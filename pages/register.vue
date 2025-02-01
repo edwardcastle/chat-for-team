@@ -6,32 +6,32 @@
       </h2>
       <form @submit.prevent="handleRegister" class="space-y-6">
         <div>
-          <label class="block text-sm font-medium text-gray-700">Email</label>
           <input
               v-model="email"
               type="email"
               required
-              class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+              placeholder="email"
+              class="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 focus:outline-none focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm"
           >
         </div>
 
         <div>
-          <label class="block text-sm font-medium text-gray-700">Username</label>
           <input
               v-model="username"
               type="text"
               required
-              class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+              placeholder="Username"
+              class="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 focus:outline-none focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm"
           >
         </div>
 
         <div>
-          <label class="block text-sm font-medium text-gray-700">Password</label>
           <input
               v-model="password"
               type="password"
+              placeholder="Password"
               required
-              class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+              class="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 focus:outline-none focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm"
           >
         </div>
 
@@ -62,38 +62,16 @@ const router = useRouter()
 const email = ref('')
 const username = ref('')
 const password = ref('')
+const {$auth} = useNuxtApp()
 
 async function handleRegister() {
   try {
-    // Check username availability
-    const { count } = await supabase
-        .from('profiles')
-        .select('*', { count: 'exact', head: true })
-        .eq('username', username.value)
-
-    if (count > 0) {
-      throw new Error('Username already taken')
-    }
-
-    // Create auth user
-    const { data: authData, error: authError } = await supabase.auth.signUp({
+    await $auth.register({
       email: email.value,
       password: password.value,
+      username: username.value
     })
-
-    if (authError) throw authError
-
-    // Create profile
-    const { error: profileError } = await supabase
-        .from('profiles')
-        .insert({
-          user_id: authData.user.id,
-          username: username.value
-        })
-
-    if (profileError) throw profileError
-
-    alert('Registration successful! Check your email for confirmation.')
+    alert('Registration successful! Check your email.')
     router.push('/login')
   } catch (error) {
     alert(error.message)
