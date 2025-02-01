@@ -17,5 +17,30 @@ export default defineNuxtConfig({
       callback: '/confirm',
       exclude: ['/*'],
     }
+  },
+  vite: {
+    server: {
+      hmr: {
+        clientPort: 3000,
+        port: 3000,
+        protocol: 'ws',
+        host: 'localhost'
+      },
+      watch: {
+        usePolling: true
+      }
+    }
+  },
+  devServer: {
+    host: '0.0.0.0',
+    port: 3000
+  },
+  nitro: {
+    devProxy: {
+      '/_nuxt': {
+        target: 'http://localhost:3000/_nuxt',
+        ws: true
+      }
+    }
   }
 })
