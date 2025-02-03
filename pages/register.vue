@@ -56,13 +56,12 @@
 </template>
 
 <script setup>
-const supabase = useSupabaseClient()
 const router = useRouter()
+const { $auth } = useNuxtApp()
 
 const email = ref('')
 const username = ref('')
 const password = ref('')
-const {$auth} = useNuxtApp()
 
 async function handleRegister() {
   try {
