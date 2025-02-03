@@ -5,7 +5,7 @@
 </template>
 
 <script setup>
-import {usePresence} from "~/composables/usePresence.js";
+import {usePresence} from "~/composables/usePresence.ts";
 
 const user = useSupabaseUser()
 const supabase = useSupabaseClient()
