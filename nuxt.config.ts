@@ -1,6 +1,9 @@
 // https://nuxt.com/docs/api/configuration/nuxt-config
 export default defineNuxtConfig({
   compatibilityDate: '2024-04-03',
+  css: [
+    '~/assets/css/main.css'
+  ],
   imports: {
     autoImport: true
   },
@@ -9,14 +12,29 @@ export default defineNuxtConfig({
     '@nuxtjs/supabase',
     '@nuxtjs/tailwindcss'
   ],
+  build: {
+    transpile: ['@heroicons/vue']
+  },
+  postcss: {
+    plugins: {
+      tailwindcss: {},
+      autoprefixer: {},
+    },
+  },
   supabase: {
     url: process.env.VITE_SUPABASE_URL,
     key: process.env.VITE_SUPABASE_ANON_KEY,
-    redirectOptions: {
-      login: '/login',
-      callback: '/confirm',
-      exclude: ['/*'],
-    }
+    cookieOptions: {
+      maxAge: 60 * 60 * 8,
+      sameSite: 'lax',
+      secure: true
+    },
+    // redirectOptions: {
+    //   login: '/login',
+    //   callback: '/confirm',
+    //   exclude: ['/*'],
+    // },
+    redirect: false
   },
   vite: {
     server: {
@@ -34,6 +52,9 @@ export default defineNuxtConfig({
   devServer: {
     host: '0.0.0.0',
     port: 3000
+  },
+  app: {
+    layoutTransition: { name: 'layout', mode: 'out-in' }
   },
   nitro: {
     devProxy: {
