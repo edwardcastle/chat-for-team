@@ -1,16 +1,16 @@
 // https://nuxt.com/docs/api/configuration/nuxt-config
 export default defineNuxtConfig({
   compatibilityDate: '2024-04-03',
-  css: [
-    '~/assets/css/main.css'
-  ],
+  css: ['~/assets/css/main.css'],
   imports: {
     autoImport: true
   },
-  devtools: {enabled: false},
+  devtools: { enabled: false },
   modules: [
     '@nuxtjs/supabase',
-    '@nuxtjs/tailwindcss'
+    '@nuxtjs/tailwindcss',
+    '@nuxt/eslint',
+    '@nuxt/image'
   ],
   build: {
     transpile: ['@heroicons/vue']
@@ -18,8 +18,8 @@ export default defineNuxtConfig({
   postcss: {
     plugins: {
       tailwindcss: {},
-      autoprefixer: {},
-    },
+      autoprefixer: {}
+    }
   },
   supabase: {
     url: process.env.VITE_SUPABASE_URL,
@@ -64,4 +64,4 @@ export default defineNuxtConfig({
       }
     }
   }
-})
+});

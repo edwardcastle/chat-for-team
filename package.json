@@ -7,18 +7,35 @@
     "dev": "HOST=0.0.0.0 nuxt dev",
     "generate": "nuxt generate",
     "preview": "nuxt preview",
-    "postinstall": "nuxt prepare"
+    "postinstall": "nuxt prepare",
+    "lint": "eslint . --fix",
+    "test": "vitest",
+    "type-check": "tsc --noEmit",
+    "typecheck": "vue-tsc --noEmit",
+    "format": "prettier --write ."
   },
   "dependencies": {
     "@headlessui/vue": "^1.7.19",
     "@heroicons/vue": "^2.1.1",
     "@nuxtjs/supabase": "^1.1.7",
-    "@nuxtjs/tailwindcss": "^6.11.4",
     "date-fns": "^3.3.1",
     "nuxt": "^3.13.2",
     "unplugin-auto-import": "^19.0.0"
   },
   "devDependencies": {
-    "supabase": "^2.9.6"
+    "@nuxt/eslint": "^1.0.0",
+    "@nuxt/image": "^1.9.0",
+    "@nuxtjs/eslint-config-typescript": "^12.1.0",
+    "@nuxtjs/tailwindcss": "^6.13.1",
+    "eslint": "^9.19.0",
+    "eslint-config-prettier": "^10.0.1",
+    "eslint-plugin-nuxt": "^4.0.0",
+    "eslint-plugin-prettier": "^5.2.3",
+    "eslint-plugin-vue": "^9.32.0",
+    "happy-dom": "^16.8.1",
+    "jsdom": "^26.0.0",
+    "prettier": "^3.4.2",
+    "supabase": "^2.9.6",
+    "typescript": "^5.7.3"
   }
 }
