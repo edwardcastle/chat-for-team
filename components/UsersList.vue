@@ -12,6 +12,7 @@
         <p v-if="!isUserOnline(user.user_id)" class="text-xs text-gray-500">
           {{ user.last_seen ? `Last seen ${formatTime(user.last_seen)}` : 'Never active' }}
         </p>
+        <p v-else class="text-xs text-gray-500">{{ 'Online' }}</p>
       </div>
     </div>
   </div>

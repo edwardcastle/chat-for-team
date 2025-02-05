@@ -4,7 +4,7 @@
       {{ userInitial }}
     </div>
     <div
-      v-if="isOnline"
+      :class="isOnline ? 'bg-green-500' : 'bg-red-500'"
       class="online-indicator"
     />
   </div>
@@ -29,6 +29,6 @@ const userInitial = computed(() =>
 }
 
 .online-indicator {
-  @apply absolute bottom-0 right-0 w-2 h-2 bg-green-500 rounded-full border-2 border-white;
+  @apply absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-white;
 }
 </style>
