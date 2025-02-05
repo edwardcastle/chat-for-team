@@ -59,21 +59,16 @@
             </div>
           </form>
         </div>
-        <div v-else class="loading-placeholder"/>
+        <div v-else class="loading-placeholder" />
       </ClientOnly>
     </div>
   </div>
 </template>
 
-<script setup>
-const supabase = useSupabaseClient();
+<script setup lang="ts">
 const router = useRouter();
 const { $auth } = useNuxtApp();
 const isMounted = ref(false);
-
-definePageMeta({
-  layout: false
-});
 
 onMounted(() => {
   isMounted.value = true;
@@ -82,7 +77,7 @@ onMounted(() => {
 const email = ref('');
 const password = ref('');
 
-async function handleLogin() {
+async function handleLogin(): Promise<void> {
   try {
     await $auth.login({
       email: email.value,
@@ -93,7 +88,7 @@ async function handleLogin() {
   }
 }
 
-function handleSignUp() {
+function handleSignUp(): void {
   router.push('/register');
 }
 </script>

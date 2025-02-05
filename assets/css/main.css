@@ -5,6 +5,8 @@
 
 :root {
   --primary-color: #3b82f6;
+  height: 100vh;
+  overflow-x: hidden;
 }
 
 .layout-enter-active,
