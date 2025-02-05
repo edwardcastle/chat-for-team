@@ -4,15 +4,15 @@
 @tailwind utilities;
 
 :root {
-    --primary-color: #3b82f6;
+  --primary-color: #3b82f6;
 }
 
 .layout-enter-active,
 .layout-leave-active {
-    transition: opacity 0.3s;
+  transition: opacity 0.3s;
 }
 
 .layout-enter-from,
 .layout-leave-to {
-    opacity: 0;
+  opacity: 0;
 }
