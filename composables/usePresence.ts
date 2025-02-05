@@ -1,4 +1,4 @@
-import type { RealtimeChannel } from '@supabase/supabase-js';
+import type { RealtimeChannel, RealtimePostgresChangesPayload } from '@supabase/supabase-js';
 import { useSupabaseClient } from '#imports';
 import type { Database } from '~/types/supabase';
 
@@ -21,6 +21,7 @@ export const usePresence = () => {
   const allUsers = ref<OnlineUser[]>([]);
   let presenceChannel: RealtimeChannel | null = null;
   let heartbeatInterval: NodeJS.Timeout | null = null;
+  let _onlineUsersChannel: RealtimeChannel | null = null;
 
   const updatePresence = async (online: boolean): Promise<void> => {
     if (!user.value) return;
@@ -57,6 +58,10 @@ export const usePresence = () => {
             onlineUsers.value = Object.values(state)
               .flat()
               .filter((user) => user.online);
+            allUsers.value = allUsers.value.map(user => ({
+              ...user,
+              online: onlineUsers.value.some(u => u.user_id === user.user_id)
+            }));
           }
         })
         .subscribe(async (status: string) => {
@@ -82,6 +87,30 @@ export const usePresence = () => {
       console.error('Presence setup failed:', error);
       throw new Error('Failed to initialize presence tracking');
     }
+
+    _onlineUsersChannel = supabase.channel('online-users-channel')
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'online_users'
+        },
+        async (payload: RealtimePostgresChangesPayload<OnlineUser>) => {
+          // Update local users state
+          allUsers.value = allUsers.value.map(user => {
+            if (user.user_id === payload.new.user_id) {
+              return {
+                ...user,
+                online: payload.new.online,
+                last_seen: payload.new.last_seen
+              };
+            }
+            return user;
+          });
+        }
+      )
+      .subscribe();
   };
 
   const cleanupPresence = async (): Promise<void> => {
@@ -89,6 +118,12 @@ export const usePresence = () => {
       if (presenceChannel) {
         await presenceChannel.unsubscribe();
         presenceChannel = null;
+      }
+
+      // Add cleanup for the online users channel
+      if (_onlineUsersChannel) {
+        await _onlineUsersChannel.unsubscribe();
+        _onlineUsersChannel = null;
       }
 
       if (heartbeatInterval) {
@@ -113,16 +148,18 @@ export const usePresence = () => {
 
       const { data: online } = await supabase
         .from('online_users')
-        .select('user_id, online');
+        .select('user_id, online, last_seen');
 
       if (profiles) {
-        allUsers.value = profiles.map((profile) => ({
-          user_id: profile.user_id,
-          username: profile.username,
-          online:
-            online?.some((u) => u.user_id === profile.user_id && u.online) ||
-            false
-        }));
+        allUsers.value = profiles.map((profile) => {
+          const onlineUser = online?.find((u) => u.user_id === profile.user_id);
+          return {
+            user_id: profile.user_id,
+            username: profile.username,
+            online: onlineUser?.online || false,
+            last_seen: onlineUser?.last_seen || null
+          };
+        });
       }
     } catch (error) {
       console.error('User loading failed:', error);
