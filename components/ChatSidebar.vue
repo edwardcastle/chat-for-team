@@ -1,5 +1,5 @@
 <template>
-  <div class="w-1/4 border-r bg-white flex flex-col">
+  <div class="w-1/5 border-r bg-white flex flex-col">
     <!-- Channels Section -->
     <ChannelsList
       :channels="channels"

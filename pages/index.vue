@@ -38,7 +38,7 @@
       </div>
     </div>
 
-    <div>
+    <div v-else>
       <NuxtLoadingIndicator />
     </div>
   </div>
