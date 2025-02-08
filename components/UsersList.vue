@@ -8,6 +8,7 @@
       <div
         v-if="currentUserId !== user.user_id"
         class="flex items-center p-2 hover:bg-gray-100 rounded cursor-pointer transition-colors"
+        @click="handleUserClick(user)"
       >
         <UserAvatar
           :user="user"
@@ -23,7 +24,7 @@
       </div>
 
       <div
-        v-else 
+        v-else
         class="flex items-center align-middle p-2 hover:bg-gray-100 w-auto cursor-pointer transition-colors absolute bottom-3"
       >
         <UserAvatar
@@ -43,6 +44,16 @@ defineProps({
   users: Array,
   isUserOnline: Function
 });
-const { currentUserId } = useUser();
 
+const emit = defineEmits(['select-dm']);
+
+const { currentUserId } = useUser();
+const { createOrGetDMChannel } = useDirectMessages();
+
+const handleUserClick = async (user) => {
+  const channelId = await createOrGetDMChannel(user.user_id);
+  if (channelId) {
+    emit('select-dm', channelId);
+  }
+};
 </script>
