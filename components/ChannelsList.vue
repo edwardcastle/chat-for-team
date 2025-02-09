@@ -1,12 +1,14 @@
+[file name]: ChannelsList.vue
+[file content begin]
 <template>
   <div class="p-4 bg-gray-50 border-b">
     <h2 class="text-sm font-semibold text-gray-500 mb-2">Channels</h2>
     <div
-      v-for="channel in channels"
+      v-for="channel in filteredChannels"
       :key="channel.id"
       class="flex items-center p-2 hover:bg-gray-100 rounded cursor-pointer transition-colors"
       :class="{ 'bg-gray-100': currentChannel?.id === channel.id }"
-      @click="$emit('select-channel', channel)"
+      @click="$emit('select-channel', channel.id)"
     >
       <div class="channel-icon">
         #
@@ -17,12 +19,16 @@
 </template>
 
 <script setup>
-defineProps({
+import { computed } from 'vue';
+
+const props = defineProps({
   channels: Array,
   currentChannel: Object
 });
 
-defineEmits(['select-channel']);
+const filteredChannels = computed(() =>
+  props.channels?.filter(channel => channel.type !== 'dm') || []
+);
 </script>
 
 <style scoped>
