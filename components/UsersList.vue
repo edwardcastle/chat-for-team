@@ -16,10 +16,10 @@
         />
         <div class="ml-3">
           <span class="text-gray-700">{{ user.username }}</span>
-          <p v-if="!isUserOnline(user.user_id)" class="text-xs text-gray-500">
+          <p v-if="!isUserOnline(user.user_id)" class="text-xs text-red-500">
             {{ formatLastSeen(user.last_seen) }}
           </p>
-          <p v-else class="text-xs text-gray-500">Online</p>
+          <p v-else class="text-xs text-green-500">Online</p>
         </div>
       </div>
 
