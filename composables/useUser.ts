@@ -2,11 +2,18 @@ import type { User } from '@supabase/supabase-js';
 import type { Profile, ProfileInsert } from '~/types/database.types';
 import type { Database } from '~/types/supabase';
 
-export const useUser = () => {
+export const useUser = (): {
+  user: Readonly<Ref<User | null>>;
+  loadUser: () => Promise<void>;
+  setUser: (newUser: User | null) => void;
+  getProfile: () => Promise<Profile | null>;
+  isLoggedIn: ComputedRef<boolean>;
+  currentUserId: ComputedRef<string | undefined>;
+} => {
   const user = useState<User | null>('user', () => null);
   const supabase = useSupabaseClient<Database>();
 
-  const loadUser = async () => {
+  const loadUser = async (): Promise<void> => {
     try {
       const {
         data: { user: authUser }
@@ -26,7 +33,7 @@ export const useUser = () => {
             user_id: authUser.id,
             username:
               authUser.user_metadata?.username ||
-              `user_${Math.random().toString(36).substr(2, 9)}`
+              `user_${Math.random().toString(36).substring(2, 11)}`
           };
 
           await supabase.from('profiles').upsert(profileData);
@@ -40,11 +47,11 @@ export const useUser = () => {
     }
   };
 
-  const setUser = (newUser: User | null) => {
+  const setUser = (newUser: User | null): void => {
     user.value = newUser;
   };
 
-  const getProfile = async () => {
+  const getProfile = async (): Promise<Profile | null> => {
     if (!user.value) return null;
     const { data } = await supabase
       .from('profiles')
