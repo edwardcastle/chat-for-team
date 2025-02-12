@@ -2,14 +2,19 @@ import { ref } from 'vue';
 import type { Database } from '~/types/supabase';
 import type { Channel } from '~/types/database.types';
 
-export const useDirectMessages = () => {
+export const useDirectMessages = (): {
+  dmChannels: typeof dmChannels,
+  currentDMChannel: typeof currentDMChannel,
+  loadDMChannels: () => Promise<void>,
+  createOrGetDMChannel: (otherUserId: string) => Promise<Channel | null>
+} => {
   const supabase = useSupabaseClient<Database>();
   const { user } = useUser();
 
   const dmChannels = ref<Channel[]>([]);
   const currentDMChannel = ref<Channel | null>(null);
 
-  const loadDMChannels = async () => {
+  const loadDMChannels = async (): Promise<void> => {
     if (!user.value?.id) return;
 
     const { data, error } = await supabase
@@ -23,7 +28,7 @@ export const useDirectMessages = () => {
     }
   };
 
-  const createOrGetDMChannel = async (otherUserId: string) => {
+  const createOrGetDMChannel = async (otherUserId: string): Promise<Channel | null> => {
     if (!user.value?.id) return null;
 
     const { data, error } = await supabase

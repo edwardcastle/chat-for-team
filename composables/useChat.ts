@@ -21,7 +21,17 @@ type MessageWithJoinedProfile = MessageRow & {
   } | null;
 };
 
-export const useChat = () => {
+export const useChat = (): {
+  messages: Ref<MessageWithProfile[]>;
+  channels: Ref<Channel[]>;
+  currentChannel: Ref<Channel | null>;
+  messagesContainer: Ref<HTMLElement | null>;
+  loadChannels: () => Promise<void>;
+  loadMessages: () => Promise<void>;
+  sendMessage: (content: string) => Promise<void>;
+  setupRealtime: () => RealtimeChannel;
+  scrollToBottom: () => void;
+} => {
   const supabase = useSupabaseClient<Database>();
   const { user } = useUser();
 

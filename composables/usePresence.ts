@@ -13,7 +13,14 @@ interface PresenceState {
   [key: string]: OnlineUser[];
 }
 
-export const usePresence = () => {
+export const usePresence = (): {
+  onlineUsers: Readonly<Ref<OnlineUser[]>>;
+  allUsers: Readonly<Ref<OnlineUser[]>>;
+  setupPresence: () => Promise<void>;
+  cleanupPresence: () => Promise<void>;
+  loadAllUsers: () => Promise<void>;
+  isUserOnline: (userId: string) => boolean;
+} => {
   const supabase = useSupabaseClient<Database>();
   const { user, loadUser } = useUser();
 
