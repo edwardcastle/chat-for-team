@@ -1,18 +1,15 @@
 <template>
   <div class="flex mb-4" :class="{ 'justify-end': isCurrentUser }">
-    <div
-      class="max-w-[70%] rounded-lg p-3"
-      :class="messageClasses"
-    >
-      <p>{{ message['profiles'].username }}</p>
+    <div class="py-3 px-4" :class="messageClasses">
+      <p class="text-sm text-gray-500 mb-1">
+        {{ message.user?.username }}
+      </p>
       <p class="text-gray-800">{{ message.content }}</p>
       <div class="message-meta">
         <span class="timestamp">
           {{ formatTime(message.created_at) }}
         </span>
-        <span v-if="isCurrentUser" class="status-icons">
-          ✓✓
-        </span>
+        <span v-if="isCurrentUser" class="status-icons">✓✓</span>
       </div>
     </div>
   </div>
@@ -23,7 +20,13 @@ import { computed } from 'vue';
 import { formatTime } from '@/utils/dateUtils';
 
 const props = defineProps({
-  message: Object,
+  message: {
+    type: Object,
+    required: true,
+    default: () => ({
+      profiles: { username: 'Unknown User' }
+    })
+  },
   isCurrentUser: Boolean
 });
 
@@ -44,6 +47,10 @@ const messageClasses = computed(() => ({
 
 .status-icons {
   @apply text-xs text-gray-500;
+}
+
+.bg-white {
+  @apply rounded-[13px_13px_13px_0px];
 }
 
 .bg-chat-sent {

@@ -1,7 +1,6 @@
 import { useSupabaseClient } from '#imports';
 import type {
-  RealtimeChannel,
-  RealtimePostgresChangesPayload
+  RealtimeChannel
 } from '@supabase/supabase-js';
 import type { Database } from '~/types/supabase';
 
@@ -40,6 +39,7 @@ export const useChat = (): {
   const channels = ref<Channel[]>([]);
   const currentChannel = ref<Channel | null>(null);
   const messagesContainer = ref<HTMLElement | null>(null);
+  const realtimeChannel = ref<RealtimeChannel | null>(null);
 
   // Channel operations
   const loadChannels = async (): Promise<void> => {
@@ -58,31 +58,33 @@ export const useChat = (): {
     }
   };
 
-  // Message operations
-  const loadMessages = async (): Promise<void> => {
+  const loadMessages = async () => {
     if (!currentChannel.value?.id) return;
 
     try {
       const { data, error } = await supabase
         .from('messages')
-        .select('*, profiles!messages_user_id_fkey(username)')
+        .select(`
+        id,
+        content,
+        created_at,
+        channel_id,
+        user_id,
+        user:user_id (
+          username
+        )
+      `)
         .eq('channel_id', currentChannel.value.id)
         .order('created_at', { ascending: true });
 
-      if (!error && data) {
-        messages.value = (data as MessageWithJoinedProfile[]).map((msg) => ({
-          id: msg.id,
-          content: msg.content,
-          channel_id: msg.channel_id,
-          user_id: msg.user_id,
-          created_at: msg.created_at,
-          profiles: msg.profiles || { username: 'Unknown User' }
-        }));
+      if (!error) {
+        messages.value = data.map(msg => ({
+          ...msg,
+          user: msg.user || null
+        })) as MessageWithProfile[];
       }
-      scrollToBottom();
     } catch (error) {
       console.error('Message load error:', error);
-      throw new Error('Failed to load messages');
     }
   };
 
@@ -103,43 +105,37 @@ export const useChat = (): {
     }
   };
 
-  // Realtime functionality
-  const setupRealtime = (): RealtimeChannel => {
-    const channel = supabase.channel('realtime-messages').on(
-      'postgres_changes',
-      {
+  const setupRealtime = () => {
+    if (realtimeChannel.value) {
+      supabase.removeChannel(realtimeChannel.value);
+      realtimeChannel.value = null;
+    }
+
+    if (!currentChannel.value?.id) return;
+
+    realtimeChannel.value = supabase.channel(`messages:${currentChannel.value.id}`)
+      .on('postgres_changes', {
         event: 'INSERT',
         schema: 'public',
         table: 'messages',
-        filter: `channel_id=eq.${currentChannel.value?.id}`
-      },
-      async (payload: RealtimePostgresChangesPayload<MessageRow>) => {
-        if (payload.new && 'user_id' in payload.new) {
-          // Fetch the profile data for the new message
-          const { data: profileData } = await supabase
-            .from('profiles')
-            .select('username')
-            .eq('user_id', payload.new.user_id)
-            .single();
-
-          const messageWithProfile: MessageWithProfile = {
-            id: payload.new.id,
-            content: payload.new.content,
-            channel_id: payload.new.channel_id,
-            user_id: payload.new.user_id,
-            created_at: payload.new.created_at,
-            profiles: profileData
-              ? { username: profileData.username }
-              : { username: 'Unknown User' }
-          };
-          messages.value = [...messages.value, messageWithProfile];
+        filter: `channel_id=eq.${currentChannel.value.id}`
+      }, (payload) => {
+        const newMessage = payload.new as MessageWithProfile;
+        if (!messages.value.some(msg => msg.id === newMessage.id)) {
+          messages.value = [...messages.value, newMessage];
           scrollToBottom();
         }
-      }
-    );
+      })
+      .subscribe();
 
-    channel.subscribe();
-    return channel;
+    return realtimeChannel.value;
+  };
+
+  const cleanupRealtime = () => {
+    if (realtimeChannel.value) {
+      supabase.removeChannel(realtimeChannel.value);
+      realtimeChannel.value = null;
+    }
   };
 
   // UI utilities
@@ -161,6 +157,7 @@ export const useChat = (): {
     loadMessages,
     sendMessage,
     setupRealtime,
+    cleanupRealtime,
     scrollToBottom
   };
 };

@@ -1,5 +1,3 @@
-[file name]: ChannelsList.vue
-[file content begin]
 <template>
   <div class="p-4 bg-gray-50 border-b">
     <h2 class="text-sm font-semibold text-gray-500 mb-2">Channels</h2>
@@ -29,6 +27,7 @@ const props = defineProps({
 const filteredChannels = computed(() =>
   props.channels?.filter(channel => channel.type !== 'dm') || []
 );
+
 </script>
 
 <style scoped>

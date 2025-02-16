@@ -1,13 +1,7 @@
 import type { RealtimeChannel, RealtimePostgresChangesPayload } from '@supabase/supabase-js';
 import { useSupabaseClient } from '#imports';
 import type { Database } from '~/types/supabase';
-
-interface OnlineUser {
-  user_id: string;
-  username?: string;
-  online: boolean;
-  last_seen?: string;
-}
+import type { OnlineUser } from '~/types/database.types';
 
 interface PresenceState {
   [key: string]: OnlineUser[];
@@ -36,7 +30,7 @@ export const usePresence = (): {
     try {
       await supabase.from('online_users').upsert({
         user_id: user.value.id,
-        username: user.value.user_metadata?.username,
+        username: user.value.username,
         online,
         last_seen: new Date().toISOString()
       });
@@ -61,21 +55,21 @@ export const usePresence = (): {
       presenceChannel
         .on('presence', { event: 'sync' }, () => {
           const state = presenceChannel?.presenceState() as PresenceState;
-          if (state) {
-            onlineUsers.value = Object.values(state)
-              .flat()
-              .filter((user) => user.online);
-            allUsers.value = allUsers.value.map(user => ({
-              ...user,
-              online: onlineUsers.value.some(u => u.user_id === user.user_id)
-            }));
-          }
+          onlineUsers.value = Object.values(state)
+            .flat()
+            .filter((user) => user.online);
+
+          // Update allUsers with latest online status
+          allUsers.value = allUsers.value.map(user => ({
+            ...user,
+            online: onlineUsers.value.some(u => u.user_id === user.user_id)
+          }));
         })
         .subscribe(async (status: string) => {
           if (status === 'SUBSCRIBED' && presenceChannel && user.value) {
             await presenceChannel.track({
               user_id: user.value.id,
-              username: user.value.user_metadata?.username,
+              username: user.value?.username,
               online: true
             });
             await updatePresence(true);

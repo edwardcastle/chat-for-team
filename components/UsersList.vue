@@ -6,7 +6,21 @@
       :key="user.user_id"
     >
       <div
-        v-if="currentUserId !== user.user_id"
+        v-if="currentUserId === user.user_id"
+        class="flex items-center p-2 hover:bg-gray-100 w-auto cursor-pointer transition-colors absolute bottom-3"
+      >
+        <UserAvatar
+          :user="user"
+          :is-online="isUserOnline(user.user_id)"
+        />
+        <span class="ml-3 text-gray-700">
+          {{ user.username }}
+        </span>
+      </div>
+
+      <!-- Other users -->
+      <div
+        v-else
         class="flex items-center p-2 hover:bg-gray-100 rounded cursor-pointer transition-colors"
         @click="handleUserClick(user)"
       >
@@ -21,19 +35,6 @@
           </p>
           <p v-else class="text-xs text-green-500">Online</p>
         </div>
-      </div>
-
-      <div
-        v-else
-        class="flex items-center align-middle p-2 hover:bg-gray-100 w-auto cursor-pointer transition-colors absolute bottom-3"
-      >
-        <UserAvatar
-          :user="user"
-          :is-online="isUserOnline(user.user_id)"
-        />
-        <span class="ml-3 text-gray-700">
-          {{ user.username }}
-        </span>
       </div>
     </div>
   </div>
@@ -50,10 +51,19 @@ const emit = defineEmits(['select-dm']);
 const { currentUserId } = useUser();
 const { createOrGetDMChannel } = useDirectMessages();
 
+
 const handleUserClick = async (user) => {
-  const channelId = await createOrGetDMChannel(user.user_id);
-  if (channelId) {
-    emit('select-dm', channelId);
+  console.log('Initiating DM with:', user.user_id);
+
+  try {
+    const channel = await createOrGetDMChannel(user.user_id);
+    console.log('Created/fetched channel:', channel);
+
+    if (channel?.id) {
+      emit('select-dm', channel.id);
+    }
+  } catch (error) {
+    console.error('DM channel error:', error);
   }
 };
 </script>

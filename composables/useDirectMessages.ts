@@ -14,7 +14,7 @@ export const useDirectMessages = (): {
   const dmChannels = ref<Channel[]>([]);
   const currentDMChannel = ref<Channel | null>(null);
 
-  const loadDMChannels = async (): Promise<void> => {
+  const loadDMChannels = async () => {
     if (!user.value?.id) return;
 
     const { data, error } = await supabase
@@ -28,20 +28,21 @@ export const useDirectMessages = (): {
     }
   };
 
-  const createOrGetDMChannel = async (otherUserId: string): Promise<Channel | null> => {
+  const createOrGetDMChannel = async (otherUserId: string) => {
     if (!user.value?.id) return null;
 
-    const { data, error } = await supabase
-      .rpc('get_or_create_dm_channel', {
-        user1_id: user.value.id,
+    try {
+      const { data, error } = await supabase.rpc('get_or_create_dm_channel', {
+        user1_id: user.value.id, // Use user.value.id directly
         user2_id: otherUserId
       });
 
-    if (!error && data) {
-      await loadDMChannels();
-      return data;
+      if (error) throw error;
+      return data?.[0] || null;
+    } catch (error) {
+      console.error('DM channel error:', error);
+      return null;
     }
-    return null;
   };
 
   return {

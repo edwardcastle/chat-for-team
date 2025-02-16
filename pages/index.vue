@@ -8,7 +8,7 @@
         :current-channel="currentChannel"
         :is-user-online="isUserOnline"
         @select-channel="selectChannel"
-        @select-dm="selectChannel"
+        @select-dm="handleDMSelect"
       />
 
       <div class="flex-1 flex flex-col">
@@ -21,6 +21,7 @@
 
         <ClientOnly>
           <MessagesList
+            :current-channel="activeChannel"
             :messages="messages"
             :current-user-id="currentUserId"
             :loading="loadingMessages"
@@ -38,7 +39,7 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 const { currentUserId, isLoggedIn } = useUser();
 const {
   onlineUsers,
@@ -57,7 +58,8 @@ const {
   loadMessages,
   sendMessage,
   setupRealtime,
-  scrollToBottom
+  scrollToBottom,
+  cleanupRealtime
 } = useChat();
 
 const {
@@ -67,16 +69,17 @@ const {
 
 const newMessage = ref('');
 const loadingMessages = ref(false);
+const activeChannel = ref(null);
 
 const currentDMUser = computed(() => {
-  if (!currentChannel.value?.type === 'dm' || !currentChannel.value.participants) {
+  if (currentChannel.value?.type !== 'dm' || !currentChannel.value.participants) {
     return null;
   }
 
   const otherUserId = currentChannel.value.participants.find(
     id => id !== currentUserId.value
   );
-    return allUsers.value.find(u => u.user_id === otherUserId);
+  return allUsers.value.find(u => u.user_id === otherUserId);
 });
 
 const initChat = async () => {
@@ -85,7 +88,8 @@ const initChat = async () => {
       loadChannels(),
       loadDMChannels(),
       loadAllUsers(),
-      setupPresence()
+      setupPresence(),
+      setupRealtime()
     ]);
     if (channels.value.length > 0) {
       await selectChannel(channels.value[0].id);
@@ -95,21 +99,22 @@ const initChat = async () => {
   }
 };
 
-const selectChannel = async (channelId) => {
+const selectChannel = async (channelId: string) => {
   const allChannels = [...channels.value, ...dmChannels.value];
   const channel = allChannels.find(c => c.id === channelId);
 
-  if (channel) {
-    currentChannel.value = channel;
-    loadingMessages.value = true;
-    try {
-      messages.value = [];
-      await loadMessages();
-      setupRealtime();
-      nextTick(scrollToBottom);
-    } finally {
-      loadingMessages.value = false;
-    }
+  if (!channel) return;
+  cleanupRealtime();
+  currentChannel.value = channel;
+  loadingMessages.value = true;
+
+  try {
+    messages.value = [];
+    await loadMessages();
+    setupRealtime();
+    nextTick(scrollToBottom);
+  } finally {
+    loadingMessages.value = false;
   }
 };
 
@@ -124,6 +129,30 @@ const handleSendMessage = async () => {
   }
 };
 
+const handleDMSelect = async (channelId: string) => {
+  try {
+    messages.value = [];
+    loadingMessages.value = true;
+
+    await loadDMChannels();
+
+    const channel = dmChannels.value.find(c => c.id === channelId);
+
+    if (channel) {
+      currentChannel.value = channel;
+      await loadMessages();
+      setupRealtime();
+      nextTick(() => scrollToBottom());
+    } else {
+      console.error('DM channel not found:', channelId);
+    }
+  } catch (error) {
+    console.error('Error handling DM selection:', error);
+  } finally {
+    loadingMessages.value = false;
+  }
+};
+
 const channelMembersOnline = computed(() => {
   if (currentChannel.value?.type === 'dm') {
     return currentDMUser.value?.online ? 1 : 0;
@@ -134,5 +163,5 @@ const channelMembersOnline = computed(() => {
 });
 
 onMounted(initChat);
-onBeforeUnmount(cleanupPresence);
+onBeforeUnmount(cleanupPresence, cleanupRealtime);
 </script>

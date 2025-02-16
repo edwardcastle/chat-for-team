@@ -15,35 +15,27 @@ export const useUser = (): {
 
   const loadUser = async (): Promise<void> => {
     try {
-      const {
-        data: { user: authUser }
-      } = await supabase.auth.getUser();
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      if (!authUser) return;
 
-      if (authUser) {
-        // Verify profile exists
-        const { data: profile, error } = await supabase
-          .from('profiles')
-          .select('user_id')
-          .eq('user_id', authUser.id)
-          .single();
+      const { data: profile, error } = await supabase
+        .from('profiles')
+        .select('user_id')
+        .eq('user_id', authUser.id)
+        .single();
 
-        if (error || !profile) {
-          // Create profile if missing
-          const profileData: ProfileInsert = {
-            user_id: authUser.id,
-            username:
-              authUser.user_metadata?.username ||
-              `user_${Math.random().toString(36).substring(2, 11)}`
-          };
-
-          await supabase.from('profiles').upsert(profileData);
-        }
+      if (error || !profile) {
+        const profileData: ProfileInsert = {
+          user_id: authUser.id,
+          username: authUser?.username || `user_${authUser.id.slice(0, 8)}`
+        };
+        const { error: profileError } = await supabase.from('profiles').upsert(profileData);
+        if (profileError) throw profileError;
       }
 
       user.value = authUser;
     } catch (error) {
       console.error('Error loading user:', error);
-      throw new Error('Failed to load user data');
     }
   };
 

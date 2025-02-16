@@ -19,13 +19,14 @@
 </template>
 
 <script setup>
-import { ref, onUpdated } from 'vue';
-
-defineProps({
+const props = defineProps({
+  currentChannel: Object,
   messages: Array,
   currentUserId: String,
   loading: Boolean
 });
+
+const { loadMessages } = useChat();
 
 const messagesContainer = ref(null);
 
@@ -38,6 +39,13 @@ const scrollToBottom = () => {
 
 // Automatically scroll when component updates
 onUpdated(scrollToBottom);
+
+watch(() => props.currentChannel, async (newVal) => {
+  if (newVal) {
+    await loadMessages();
+    scrollToBottom();
+  }
+}, { immediate: true });
 
 defineExpose({ scrollToBottom });
 </script>
