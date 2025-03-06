@@ -1,24 +1,18 @@
 <template>
-  <div
-    ref="messagesContainer"
-    class="flex-1 overflow-y-auto p-4 bg-chat-bg"
-  >
-    <div v-if="loading" class="text-center text-gray-500 py-4">
-      Loading messages...
-    </div>
-
-    <template v-else>
-      <MessageItem
-        v-for="message in messages"
-        :key="message.id"
-        :message="message"
-        :is-current-user="message.user_id === currentUserId"
-      />
-    </template>
-  </div>
+  <VirtualList
+    :data-sources="enhancedMessages"
+    :data-key="'id'"
+    :data-component="MessageItem"
+    :keeps="20"
+    class="h-full overflow-y-auto"
+  />
 </template>
 
 <script setup>
+import { computed } from 'vue';
+import VirtualList from 'vue3-virtual-scroll-list';
+import MessageItem from './MessageItem.vue';
+
 const props = defineProps({
   currentChannel: Object,
   messages: Array,
@@ -26,26 +20,14 @@ const props = defineProps({
   loading: Boolean
 });
 
-const { loadMessages } = useChat();
+const enhancedMessages = computed(() => {
+  return props.messages.map(msg => {
+    return { ...msg };
+  });
+});
 
-const messagesContainer = ref(null);
 
-// Scroll to bottom when messages update
-const scrollToBottom = () => {
-  if (messagesContainer.value) {
-    messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight;
-  }
-};
+console.log('Current User ID:', props.currentUserId);
+console.log('Sample Message:', props.messages[0]?.user_id);
 
-// Automatically scroll when component updates
-onUpdated(scrollToBottom);
-
-watch(() => props.currentChannel, async (newVal) => {
-  if (newVal) {
-    await loadMessages();
-    scrollToBottom();
-  }
-}, { immediate: true });
-
-defineExpose({ scrollToBottom });
 </script>

@@ -2,6 +2,7 @@ import type { RealtimeChannel, RealtimePostgresChangesPayload } from '@supabase/
 import { useSupabaseClient } from '#imports';
 import type { Database } from '~/types/supabase';
 import type { OnlineUser } from '~/types/database.types';
+import { useDebounceFn } from '@vueuse/core'
 
 interface PresenceState {
   [key: string]: OnlineUser[];
@@ -12,6 +13,7 @@ export const usePresence = (): {
   allUsers: Readonly<Ref<OnlineUser[]>>;
   setupPresence: () => Promise<void>;
   cleanupPresence: () => Promise<void>;
+  cleanupCache: () => Promise<void>;
   loadAllUsers: () => Promise<void>;
   isUserOnline: (userId: string) => boolean;
 } => {
@@ -39,6 +41,8 @@ export const usePresence = (): {
       throw new Error('Failed to update presence status');
     }
   };
+
+  const debouncedPresenceUpdate = useDebounceFn(updatePresence, 5000);
 
   const setupPresence = async (): Promise<void> => {
     if (import.meta.server) return;
@@ -76,14 +80,11 @@ export const usePresence = (): {
           }
         });
 
+
       // Setup presence heartbeat
-      heartbeatInterval = setInterval(async () => {
-        try {
-          await updatePresence(true);
-        } catch (error) {
-          console.error('Presence heartbeat failed:', error);
-        }
-      }, 15000);
+      heartbeatInterval = setInterval(() => {
+        debouncedPresenceUpdate(true);
+      }, 30000);
     } catch (error) {
       console.error('Presence setup failed:', error);
       throw new Error('Failed to initialize presence tracking');
@@ -106,7 +107,7 @@ export const usePresence = (): {
                 online: payload.new.online,
                 last_seen: payload.new.last_seen
               };
-            }
+            }cleanupCache
             return user;
           });
         }
@@ -172,11 +173,18 @@ export const usePresence = (): {
     return onlineUsers.value.some((u) => u.user_id === userId && u.online);
   };
 
+  const cleanupCache = () => {
+    messageCache.clear();
+    activeSubscriptions.forEach(ch => ch.unsubscribe());
+    activeSubscriptions.clear();
+  };
+
   return {
     onlineUsers: readonly(onlineUsers),
     allUsers: readonly(allUsers),
     setupPresence,
     cleanupPresence,
+    cleanupCache,
     loadAllUsers,
     isUserOnline
   };

@@ -1,39 +1,32 @@
 <template>
-  <div class="flex mb-4" :class="{ 'justify-end': isCurrentUser }">
-    <div class="py-3 px-4" :class="messageClasses">
+  <div class="flex mb-4" :class="{ 'justify-end': source.user_id === currentUserId }">
+    <div class="py-3 px-4 bg-white" :class="{ 'bg-chat-sent ml-auto': source.user_id === currentUserId }">
       <p class="text-sm text-gray-500 mb-1">
-        {{ message.user?.username }}
+        {{ source.user?.username }}
       </p>
-      <p class="text-gray-800">{{ message.content }}</p>
+      <p class="text-gray-800">{{ source.content }}</p>
       <div class="message-meta">
         <span class="timestamp">
-          {{ formatTime(message.created_at) }}
+          {{ formatTime(source.created_at) }}
         </span>
-        <span v-if="isCurrentUser" class="status-icons">✓✓</span>
+        <span v-if="isCurrent" class="status-icons">✓✓</span>
       </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { computed } from 'vue';
-import { formatTime } from '@/utils/dateUtils';
-
+const { currentUserId } = useUser();
 const props = defineProps({
-  message: {
+  source: {
     type: Object,
-    required: true,
-    default: () => ({
-      profiles: { username: 'Unknown User' }
-    })
-  },
-  isCurrentUser: Boolean
+    required: true
+  }
 });
 
-const messageClasses = computed(() => ({
-  'bg-chat-sent ml-auto': props.isCurrentUser,
-  'bg-white': !props.isCurrentUser
-}));
+const isCurrent = computed(
+  () => props.source.user_id === currentUserId
+);
 </script>
 
 <style scoped>

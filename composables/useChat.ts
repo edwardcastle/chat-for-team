@@ -14,12 +14,6 @@ interface MessageWithProfile extends Omit<MessageRow, 'profiles'> {
   } | null;
 }
 
-type MessageWithJoinedProfile = MessageRow & {
-  profiles: {
-    username: string;
-  } | null;
-};
-
 export const useChat = (): {
   messages: Ref<MessageWithProfile[]>;
   channels: Ref<Channel[]>;
@@ -29,6 +23,7 @@ export const useChat = (): {
   loadMessages: () => Promise<void>;
   sendMessage: (content: string) => Promise<void>;
   setupRealtime: () => RealtimeChannel;
+  cleanupRealtime: () => void;
   scrollToBottom: () => void;
 } => {
   const supabase = useSupabaseClient<Database>();
@@ -36,10 +31,11 @@ export const useChat = (): {
 
   // Reactive state
   const messages = ref<MessageWithProfile[]>([]);
+  const messageCache = new Map<string, MessageWithProfile[]>();
   const channels = ref<Channel[]>([]);
   const currentChannel = ref<Channel | null>(null);
   const messagesContainer = ref<HTMLElement | null>(null);
-  const realtimeChannel = ref<RealtimeChannel | null>(null);
+  const activeSubscriptions = new Map<string, RealtimeChannel>();
 
   // Channel operations
   const loadChannels = async (): Promise<void> => {
@@ -61,6 +57,11 @@ export const useChat = (): {
   const loadMessages = async () => {
     if (!currentChannel.value?.id) return;
 
+    if (messageCache.has(currentChannel.value.id)) {
+      messages.value = messageCache.get(currentChannel.value.id);
+      return;
+    }
+
     try {
       const { data, error } = await supabase
         .from('messages')
@@ -75,50 +76,83 @@ export const useChat = (): {
         )
       `)
         .eq('channel_id', currentChannel.value.id)
-        .order('created_at', { ascending: true });
+        .order('created_at', { ascending: true })
+        .limit(100);
 
       if (!error) {
-        messages.value = data.map(msg => ({
-          ...msg,
-          user: msg.user || null
-        })) as MessageWithProfile[];
+        messageCache.set(currentChannel.value.id, data);
+        messages.value = data;
       }
     } catch (error) {
       console.error('Message load error:', error);
     }
   };
 
+// useChat.ts - Modified sendMessage function
   const sendMessage = async (content: string): Promise<void> => {
     if (!content.trim() || !currentChannel.value?.id || !user.value?.id) return;
 
+    // Generate temporary ID for optimistic update
+    const tempId = `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+    // Create optimistic message
+    const optimisticMessage: MessageWithProfile = {
+      id: tempId,
+      content,
+      created_at: new Date().toISOString(),
+      channel_id: currentChannel.value.id,
+      user_id: user.value.id,
+      profiles: {
+        username: user.value.user_metadata?.username || 'You'
+      }
+    };
+
+    // Optimistic update
+    messages.value = [...messages.value, optimisticMessage];
+    scrollToBottom();
+
     try {
-      const { error } = await supabase.from('messages').insert({
-        content,
-        channel_id: currentChannel.value.id,
-        user_id: user.value.id
-      });
+      const { data, error } = await supabase
+        .from('messages')
+        .insert({
+          content,
+          channel_id: currentChannel.value.id,
+          user_id: user.value.id
+        })
+        .select('*');
 
       if (error) throw error;
+      if (!data || !data[0]) throw new Error('Failed to send message');
+
+      // Replace optimistic message with real data
+      messages.value = messages.value.map(msg =>
+        msg.id === tempId ? { ...data[0], profiles: optimisticMessage.profiles } : msg
+      );
     } catch (error) {
       console.error('Message send error:', error);
-      throw new Error('Failed to send message');
+      // Rollback optimistic update
+      messages.value = messages.value.filter(msg => msg.id !== tempId);
+      throw error;
     }
   };
 
-  const setupRealtime = () => {
-    if (realtimeChannel.value) {
-      supabase.removeChannel(realtimeChannel.value);
-      realtimeChannel.value = null;
-    }
-
+  const setupRealtime = (): RealtimeChannel | undefined => {
     if (!currentChannel.value?.id) return;
 
-    realtimeChannel.value = supabase.channel(`messages:${currentChannel.value.id}`)
+    const channelId = currentChannel.value.id;
+
+    // Cleanup existing subscription
+    if (activeSubscriptions.has(channelId)) {
+      const existing = activeSubscriptions.get(channelId);
+      existing?.unsubscribe();
+    }
+
+    const channel = supabase.channel(`messages:${channelId}`)
       .on('postgres_changes', {
         event: 'INSERT',
         schema: 'public',
         table: 'messages',
-        filter: `channel_id=eq.${currentChannel.value.id}`
+        filter: `channel_id=eq.${channelId}`
       }, (payload) => {
         const newMessage = payload.new as MessageWithProfile;
         if (!messages.value.some(msg => msg.id === newMessage.id)) {
@@ -128,14 +162,15 @@ export const useChat = (): {
       })
       .subscribe();
 
-    return realtimeChannel.value;
+    activeSubscriptions.set(channelId, channel);
+    return channel;
   };
 
-  const cleanupRealtime = () => {
-    if (realtimeChannel.value) {
-      supabase.removeChannel(realtimeChannel.value);
-      realtimeChannel.value = null;
-    }
+  const cleanupRealtime = (): void => {
+    activeSubscriptions.forEach(channel => {
+      channel.unsubscribe();
+    });
+    activeSubscriptions.clear();
   };
 
   // UI utilities

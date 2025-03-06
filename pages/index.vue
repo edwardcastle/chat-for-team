@@ -47,19 +47,20 @@ const {
   loadAllUsers,
   isUserOnline,
   setupPresence,
-  cleanupPresence
+  cleanupPresence,
+  cleanupCache
 } = usePresence();
 
 const {
   messages,
   channels,
   currentChannel,
+  cleanupRealtime,
   loadChannels,
   loadMessages,
   sendMessage,
   setupRealtime,
-  scrollToBottom,
-  cleanupRealtime
+  scrollToBottom
 } = useChat();
 
 const {
@@ -163,5 +164,5 @@ const channelMembersOnline = computed(() => {
 });
 
 onMounted(initChat);
-onBeforeUnmount(cleanupPresence, cleanupRealtime);
+onBeforeUnmount(cleanupPresence, cleanupRealtime, cleanupCache);
 </script>
