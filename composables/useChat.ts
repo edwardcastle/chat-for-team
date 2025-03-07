@@ -1,7 +1,5 @@
 import { useSupabaseClient } from '#imports';
-import type {
-  RealtimeChannel
-} from '@supabase/supabase-js';
+import type { RealtimeChannel } from '@supabase/supabase-js';
 import type { Database } from '~/types/supabase';
 
 type Tables = Database['public']['Tables'];
@@ -33,9 +31,24 @@ export const useChat = (): {
   const messages = ref<MessageWithProfile[]>([]);
   const messageCache = new Map<string, MessageWithProfile[]>();
   const channels = ref<Channel[]>([]);
-  const currentChannel = ref<Channel | null>(null);
+  let currentChannel = ref<Channel | null>(null);
+  const realtimeChannel: Ref<RealtimeChannel | null> = ref(null);
+  if (import.meta.client) {
+    currentChannel = ref<Channel | null>(
+      JSON.parse(localStorage.getItem('currentChannel') || 'null')
+    );
+  }
   const messagesContainer = ref<HTMLElement | null>(null);
-  const activeSubscriptions = new Map<string, RealtimeChannel>();
+
+  watch(
+    currentChannel,
+    (newVal) => {
+      if (import.meta.client) {
+        localStorage.setItem('currentChannel', JSON.stringify(newVal));
+      }
+    },
+    { deep: true }
+  );
 
   // Channel operations
   const loadChannels = async (): Promise<void> => {
@@ -65,16 +78,15 @@ export const useChat = (): {
     try {
       const { data, error } = await supabase
         .from('messages')
-        .select(`
+        .select(
+          `
         id,
         content,
         created_at,
         channel_id,
         user_id,
-        user:user_id (
-          username
+        profiles(username)`
         )
-      `)
         .eq('channel_id', currentChannel.value.id)
         .order('created_at', { ascending: true })
         .limit(100);
@@ -88,14 +100,11 @@ export const useChat = (): {
     }
   };
 
-// useChat.ts - Modified sendMessage function
   const sendMessage = async (content: string): Promise<void> => {
     if (!content.trim() || !currentChannel.value?.id || !user.value?.id) return;
 
-    // Generate temporary ID for optimistic update
-    const tempId = `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 
-    // Create optimistic message
     const optimisticMessage: MessageWithProfile = {
       id: tempId,
       content,
@@ -107,9 +116,8 @@ export const useChat = (): {
       }
     };
 
-    // Optimistic update
     messages.value = [...messages.value, optimisticMessage];
-    scrollToBottom();
+    await scrollToBottom();
 
     try {
       const { data, error } = await supabase
@@ -119,67 +127,67 @@ export const useChat = (): {
           channel_id: currentChannel.value.id,
           user_id: user.value.id
         })
-        .select('*');
+        .select('*, profiles(username)') // Return joined data
+        .single();
 
       if (error) throw error;
-      if (!data || !data[0]) throw new Error('Failed to send message');
 
       // Replace optimistic message with real data
-      messages.value = messages.value.map(msg =>
-        msg.id === tempId ? { ...data[0], profiles: optimisticMessage.profiles } : msg
+      messages.value = messages.value.map((msg) =>
+        msg.id === tempId
+          ? { ...data, profiles: optimisticMessage.profiles }
+          : msg
       );
     } catch (error) {
       console.error('Message send error:', error);
-      // Rollback optimistic update
-      messages.value = messages.value.filter(msg => msg.id !== tempId);
+      messages.value = messages.value.filter((msg) => msg.id !== tempId);
       throw error;
     }
   };
 
-  const setupRealtime = (): RealtimeChannel | undefined => {
-    if (!currentChannel.value?.id) return;
-
-    const channelId = currentChannel.value.id;
-
-    // Cleanup existing subscription
-    if (activeSubscriptions.has(channelId)) {
-      const existing = activeSubscriptions.get(channelId);
-      existing?.unsubscribe();
+  const setupRealtime = () => {
+    // Cleanup existing subscription first
+    if (realtimeChannel.value) {
+      supabase.removeChannel(realtimeChannel.value);
+      realtimeChannel.value = null;
     }
 
-    const channel = supabase.channel(`messages:${channelId}`)
-      .on('postgres_changes', {
-        event: 'INSERT',
-        schema: 'public',
-        table: 'messages',
-        filter: `channel_id=eq.${channelId}`
-      }, (payload) => {
-        const newMessage = payload.new as MessageWithProfile;
-        if (!messages.value.some(msg => msg.id === newMessage.id)) {
-          messages.value = [...messages.value, newMessage];
-          scrollToBottom();
-        }
-      })
-      .subscribe();
+    if (!currentChannel.value?.id) return;
 
-    activeSubscriptions.set(channelId, channel);
-    return channel;
+    realtimeChannel.value = supabase
+      .channel(`messages:${currentChannel.value.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'messages',
+          filter: `channel_id=eq.${currentChannel.value.id}`
+        },
+        (payload) => {
+          const newMessage = payload.new as MessageWithProfile;
+          if (!messages.value.some((msg) => msg.id === newMessage.id)) {
+            messages.value = [...messages.value, newMessage];
+            scrollToBottom();
+          }
+        }
+      )
+      .subscribe();
   };
 
-  const cleanupRealtime = (): void => {
-    activeSubscriptions.forEach(channel => {
-      channel.unsubscribe();
-    });
-    activeSubscriptions.clear();
+  const cleanupRealtime = () => {
+    if (realtimeChannel.value) {
+      supabase.removeChannel(realtimeChannel.value);
+      realtimeChannel.value = null;
+    }
   };
 
   // UI utilities
-  const scrollToBottom = (): void => {
-    nextTick(() => {
-      if (messagesContainer.value) {
-        messagesContainer.value.scrollTop =
-          messagesContainer.value.scrollHeight;
-      }
+  const scrollToBottom = async (): Promise<void> => {
+    await nextTick();
+    messagesContainer.value?.scrollTo({
+      top: messagesContainer.value.scrollHeight,
+      behavior: 'smooth'
     });
   };
 
