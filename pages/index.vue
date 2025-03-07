@@ -63,38 +63,46 @@ const {
   scrollToBottom
 } = useChat();
 
-const {
-  dmChannels,
-  loadDMChannels
-} = useDirectMessages();
+const { dmChannels, loadDMChannels } = useDirectMessages();
 
 const newMessage = ref('');
 const loadingMessages = ref(false);
 const activeChannel = ref(null);
 
 const currentDMUser = computed(() => {
-  if (currentChannel.value?.type !== 'dm' || !currentChannel.value.participants) {
+  if (
+    currentChannel.value?.type !== 'dm' ||
+    !currentChannel.value.participants
+  ) {
     return null;
   }
 
   const otherUserId = currentChannel.value.participants.find(
-    id => id !== currentUserId.value
+    (id) => id !== currentUserId.value
   );
-  return allUsers.value.find(u => u.user_id === otherUserId);
+  return allUsers.value.find((u) => u.user_id === otherUserId);
 });
 
 const initChat = async () => {
+  await loadAllUsers();
   try {
     await Promise.all([
       loadChannels(),
       loadDMChannels(),
-      loadAllUsers(),
-      setupPresence(),
-      setupRealtime()
+      setupPresence()
     ]);
     if (channels.value.length > 0) {
-      await selectChannel(channels.value[0].id);
+      const savedChannel = JSON.parse(
+        localStorage.getItem('currentChannel') || 'null'
+      );
+
+      const targetChannel = savedChannel?.id
+        ? channels.value.find((c) => c.id === savedChannel.id)
+        : channels.value[0];
+
+      if (targetChannel) await selectChannel(targetChannel.id);
     }
+    setupRealtime();
   } catch (error) {
     console.error('Failed to initialize chat:', error);
   }
@@ -102,7 +110,7 @@ const initChat = async () => {
 
 const selectChannel = async (channelId: string) => {
   const allChannels = [...channels.value, ...dmChannels.value];
-  const channel = allChannels.find(c => c.id === channelId);
+  const channel = allChannels.find((c) => c.id === channelId);
 
   if (!channel) return;
   cleanupRealtime();
@@ -137,13 +145,16 @@ const handleDMSelect = async (channelId: string) => {
 
     await loadDMChannels();
 
-    const channel = dmChannels.value.find(c => c.id === channelId);
+    const channel = dmChannels.value.find((c) => c.id === channelId);
 
     if (channel) {
       currentChannel.value = channel;
       await loadMessages();
       setupRealtime();
-      nextTick(() => scrollToBottom());
+      await nextTick();
+      await nextTick();
+      scrollToBottom('auto');
+      setTimeout(() => scrollToBottom('auto'), 100);
     } else {
       console.error('DM channel not found:', channelId);
     }
@@ -158,11 +169,12 @@ const channelMembersOnline = computed(() => {
   if (currentChannel.value?.type === 'dm') {
     return currentDMUser.value?.online ? 1 : 0;
   }
-  return currentChannel.value?.members?.filter(member =>
-    onlineUsers.value.some(u => u.user_id === member)
-  ).length || 0;
+  return (
+    currentChannel.value?.members?.filter((member) =>
+      onlineUsers.value.some((u) => u.user_id === member)
+    ).length || 0
+  );
 });
-
 onMounted(initChat);
 onBeforeUnmount(cleanupPresence, cleanupRealtime, cleanupCache);
 </script>
