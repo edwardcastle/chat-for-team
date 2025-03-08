@@ -21,11 +21,11 @@
 
         <ClientOnly>
           <MessagesList
-            :current-channel="activeChannel"
+            ref="messagesListRef"
+            :current-channel="currentChannel"
             :messages="messages"
             :current-user-id="currentUserId"
             :loading="loadingMessages"
-            @scroll-to-bottom="scrollToBottom"
           />
         </ClientOnly>
 
@@ -40,6 +40,8 @@
 </template>
 
 <script setup lang="ts">
+import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue';
+
 const { currentUserId, isLoggedIn } = useUser();
 const {
   onlineUsers,
@@ -48,7 +50,7 @@ const {
   isUserOnline,
   setupPresence,
   cleanupPresence,
-  cleanupCache
+  cleanupCache: cleanupPresenceCache
 } = usePresence();
 
 const {
@@ -60,16 +62,19 @@ const {
   loadMessages,
   sendMessage,
   setupRealtime,
-  scrollToBottom
+  scrollToBottom,
+  clearCache: clearChatCache
 } = useChat();
 
 const { dmChannels, loadDMChannels } = useDirectMessages();
 
 const newMessage = ref('');
 const loadingMessages = ref(false);
-const activeChannel = ref(null);
+const messagesListRef = ref<{
+  scrollToBottom: (behavior?: string) => void;
+} | null>(null);
 
-const currentDMUser = computed(() => {
+const currentDMUser = computed<OnlineUser | null>(() => {
   if (
     currentChannel.value?.type !== 'dm' ||
     !currentChannel.value.participants
@@ -80,27 +85,27 @@ const currentDMUser = computed(() => {
   const otherUserId = currentChannel.value.participants.find(
     (id) => id !== currentUserId.value
   );
-  return allUsers.value.find((u) => u.user_id === otherUserId);
+  return allUsers.value.find((u) => u.user_id === otherUserId) || null;
 });
 
-const initChat = async () => {
+const initChat = async (): Promise<void> => {
   await loadAllUsers();
   try {
-    await Promise.all([
-      loadChannels(),
-      loadDMChannels(),
-      setupPresence()
-    ]);
+    await Promise.all([loadChannels(), loadDMChannels(), setupPresence()]);
     if (channels.value.length > 0) {
-      const savedChannel = JSON.parse(
-        localStorage.getItem('currentChannel') || 'null'
-      );
+      if (import.meta.client) {
+        const savedChannel = JSON.parse(
+          localStorage.getItem('currentChannel') || 'null'
+        );
 
-      const targetChannel = savedChannel?.id
-        ? channels.value.find((c) => c.id === savedChannel.id)
-        : channels.value[0];
+        const targetChannel = savedChannel?.id
+          ? channels.value.find((c) => c.id === savedChannel.id)
+          : channels.value[0];
 
-      if (targetChannel) await selectChannel(targetChannel.id);
+        if (targetChannel) await selectChannel(targetChannel.id);
+      } else {
+        if (channels.value[0]) await selectChannel(channels.value[0].id);
+      }
     }
     setupRealtime();
   } catch (error) {
@@ -108,7 +113,7 @@ const initChat = async () => {
   }
 };
 
-const selectChannel = async (channelId: string) => {
+const selectChannel = async (channelId: string): Promise<void> => {
   const allChannels = [...channels.value, ...dmChannels.value];
   const channel = allChannels.find((c) => c.id === channelId);
 
@@ -120,25 +125,28 @@ const selectChannel = async (channelId: string) => {
   try {
     messages.value = [];
     await loadMessages();
+    await nextTick();
     setupRealtime();
-    nextTick(scrollToBottom);
+    await nextTick();
+    scrollToBottom();
   } finally {
     loadingMessages.value = false;
   }
 };
 
-const handleSendMessage = async () => {
+const handleSendMessage = async (): Promise<void> => {
   if (!newMessage.value.trim() || !currentChannel.value) return;
   try {
     await sendMessage(newMessage.value);
     newMessage.value = '';
-    nextTick(scrollToBottom);
+    await nextTick();
+    scrollToBottom();
   } catch (error) {
     console.error('Failed to send message:', error);
   }
 };
 
-const handleDMSelect = async (channelId: string) => {
+const handleDMSelect = async (channelId: string): Promise<void> => {
   try {
     messages.value = [];
     loadingMessages.value = true;
@@ -153,8 +161,8 @@ const handleDMSelect = async (channelId: string) => {
       setupRealtime();
       await nextTick();
       await nextTick();
-      scrollToBottom('auto');
-      setTimeout(() => scrollToBottom('auto'), 100);
+      scrollToBottom();
+      setTimeout(() => scrollToBottom(), 100);
     } else {
       console.error('DM channel not found:', channelId);
     }
@@ -165,7 +173,7 @@ const handleDMSelect = async (channelId: string) => {
   }
 };
 
-const channelMembersOnline = computed(() => {
+const channelMembersOnline = computed((): number => {
   if (currentChannel.value?.type === 'dm') {
     return currentDMUser.value?.online ? 1 : 0;
   }
@@ -175,6 +183,12 @@ const channelMembersOnline = computed(() => {
     ).length || 0
   );
 });
+
 onMounted(initChat);
-onBeforeUnmount(cleanupPresence, cleanupRealtime, cleanupCache);
+onBeforeUnmount(() => {
+  cleanupPresence();
+  cleanupRealtime();
+  clearChatCache();
+  cleanupPresenceCache();
+});
 </script>

@@ -1,16 +1,7 @@
 import { useSupabaseClient } from '#imports';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 import type { Database } from '~/types/supabase';
-
-type Tables = Database['public']['Tables'];
-type MessageRow = Tables['messages']['Row'];
-type Channel = Tables['channels']['Row'];
-
-interface MessageWithProfile extends Omit<MessageRow, 'profiles'> {
-  profiles: {
-    username: string;
-  } | null;
-}
+import type { MessageWithProfile, Channel } from '~/types/database.types';
 
 export const useChat = (): {
   messages: Ref<MessageWithProfile[]>;
@@ -23,6 +14,7 @@ export const useChat = (): {
   setupRealtime: () => RealtimeChannel;
   cleanupRealtime: () => void;
   scrollToBottom: () => void;
+  clearCache: () => void;
 } => {
   const supabase = useSupabaseClient<Database>();
   const { user } = useUser();
@@ -39,6 +31,43 @@ export const useChat = (): {
     );
   }
   const messagesContainer = ref<HTMLElement | null>(null);
+
+  // Local storage helpers
+  const saveMessagesToLocalStorage = (channelId: string, msgs: MessageWithProfile[]): void => {
+    if (import.meta.client) {
+      try {
+        localStorage.setItem(`messages_${channelId}`, JSON.stringify(msgs));
+      } catch (error) {
+        console.error('Failed to save messages to localStorage:', error);
+      }
+    }
+  };
+
+  const getMessagesFromLocalStorage = (channelId: string): MessageWithProfile[] => {
+    if (import.meta.client) {
+      try {
+        const storedMessages = localStorage.getItem(`messages_${channelId}`);
+        return storedMessages ? JSON.parse(storedMessages) : [];
+      } catch (error) {
+        console.error('Failed to get messages from localStorage:', error);
+      }
+    }
+    return [];
+  };
+
+  const clearCache = (): void => {
+    messageCache.clear();
+
+    // Only clear localStorage on client
+    if (import.meta.client) {
+      const keys = Object.keys(localStorage);
+      keys.forEach(key => {
+        if (key.startsWith('messages_')) {
+          localStorage.removeItem(key);
+        }
+      });
+    }
+  };
 
   watch(
     currentChannel,
@@ -59,7 +88,7 @@ export const useChat = (): {
         .order('created_at', { ascending: true });
 
       if (!error && data) {
-        channels.value = data;
+        channels.value = data as Channel[];
       }
     } catch (error) {
       console.error('Channel load error:', error);
@@ -67,12 +96,23 @@ export const useChat = (): {
     }
   };
 
-  const loadMessages = async () => {
+  const loadMessages = async (): Promise<void> => {
     if (!currentChannel.value?.id) return;
 
-    if (messageCache.has(currentChannel.value.id)) {
-      messages.value = messageCache.get(currentChannel.value.id);
-      return;
+    // First check memory cache
+    const cachedMessages = messageCache.get(currentChannel.value.id);
+
+    if (cachedMessages?.length) {
+      messages.value = cachedMessages;
+    } else {
+      // Try localStorage if not in memory
+      const storedMessages = getMessagesFromLocalStorage(currentChannel.value.id);
+      if (storedMessages.length > 0) {
+        messages.value = storedMessages;
+        messageCache.set(currentChannel.value.id, storedMessages);
+      } else {
+        messages.value = [];
+      }
     }
 
     try {
@@ -80,20 +120,22 @@ export const useChat = (): {
         .from('messages')
         .select(
           `
-        id,
-        content,
-        created_at,
-        channel_id,
-        user_id,
-        profiles(username)`
+          id,
+          content,
+          created_at,
+          channel_id,
+          user_id,
+          profiles(username)`
         )
         .eq('channel_id', currentChannel.value.id)
         .order('created_at', { ascending: true })
         .limit(100);
 
-      if (!error) {
-        messageCache.set(currentChannel.value.id, data);
-        messages.value = data;
+      if (!error && data) {
+        const typedData = data as unknown as MessageWithProfile[];
+        messageCache.set(currentChannel.value.id, typedData);
+        saveMessagesToLocalStorage(currentChannel.value.id, typedData);
+        messages.value = typedData;
       }
     } catch (error) {
       console.error('Message load error:', error);
@@ -116,7 +158,13 @@ export const useChat = (): {
       }
     };
 
-    messages.value = [...messages.value, optimisticMessage];
+    const updatedMessages = [...messages.value, optimisticMessage];
+    messages.value = updatedMessages;
+
+    // Update cache with optimistic message
+    messageCache.set(currentChannel.value.id, updatedMessages);
+    saveMessagesToLocalStorage(currentChannel.value.id, updatedMessages);
+
     await scrollToBottom();
 
     try {
@@ -127,34 +175,41 @@ export const useChat = (): {
           channel_id: currentChannel.value.id,
           user_id: user.value.id
         })
-        .select('*, profiles(username)') // Return joined data
+        .select('id')
         .single();
 
       if (error) throw error;
 
-      // Replace optimistic message with real data
-      messages.value = messages.value.map((msg) =>
-        msg.id === tempId
-          ? { ...data, profiles: optimisticMessage.profiles }
-          : msg
+      const finalMessages = messages.value.map((msg) =>
+        msg.id === tempId ? { ...msg, id: data.id } : msg
       );
+
+      messages.value = finalMessages;
+      messageCache.set(currentChannel.value.id, finalMessages);
+      saveMessagesToLocalStorage(currentChannel.value.id, finalMessages);
+
     } catch (error) {
       console.error('Message send error:', error);
-      messages.value = messages.value.filter((msg) => msg.id !== tempId);
+      const filteredMessages = messages.value.filter((msg) => msg.id !== tempId);
+      messages.value = filteredMessages;
+      messageCache.set(currentChannel.value.id, filteredMessages);
+      saveMessagesToLocalStorage(currentChannel.value.id, filteredMessages);
       throw error;
     }
   };
 
-  const setupRealtime = () => {
+  const setupRealtime = (): RealtimeChannel => {
     // Cleanup existing subscription first
     if (realtimeChannel.value) {
       supabase.removeChannel(realtimeChannel.value);
       realtimeChannel.value = null;
     }
 
-    if (!currentChannel.value?.id) return;
+    if (!currentChannel.value?.id) {
+      throw new Error('Cannot setup realtime without a channel');
+    }
 
-    realtimeChannel.value = supabase
+    const channel = supabase
       .channel(`messages:${currentChannel.value.id}`)
       .on(
         'postgres_changes',
@@ -167,15 +222,24 @@ export const useChat = (): {
         (payload) => {
           const newMessage = payload.new as MessageWithProfile;
           if (!messages.value.some((msg) => msg.id === newMessage.id)) {
-            messages.value = [...messages.value, newMessage];
+            const updatedMessages = [...messages.value, newMessage];
+            messages.value = updatedMessages;
+
+            // Update caches
+            messageCache.set(currentChannel.value!.id, updatedMessages);
+            saveMessagesToLocalStorage(currentChannel.value!.id, updatedMessages);
+
             scrollToBottom();
           }
         }
       )
       .subscribe();
+
+    realtimeChannel.value = channel;
+    return channel;
   };
 
-  const cleanupRealtime = () => {
+  const cleanupRealtime = (): void => {
     if (realtimeChannel.value) {
       supabase.removeChannel(realtimeChannel.value);
       realtimeChannel.value = null;
@@ -201,6 +265,7 @@ export const useChat = (): {
     sendMessage,
     setupRealtime,
     cleanupRealtime,
-    scrollToBottom
+    scrollToBottom,
+    clearCache
   };
 };

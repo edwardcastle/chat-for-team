@@ -1,8 +1,11 @@
-import type { RealtimeChannel, RealtimePostgresChangesPayload } from '@supabase/supabase-js';
+import type {
+  RealtimeChannel,
+  RealtimePostgresChangesPayload
+} from '@supabase/supabase-js';
 import { useSupabaseClient } from '#imports';
 import type { Database } from '~/types/supabase';
 import type { OnlineUser } from '~/types/database.types';
-import { useDebounceFn } from '@vueuse/core'
+import { useDebounceFn } from '@vueuse/core';
 
 interface PresenceState {
   [key: string]: OnlineUser[];
@@ -26,13 +29,16 @@ export const usePresence = (): {
   let heartbeatInterval: NodeJS.Timeout | null = null;
   let _onlineUsersChannel: RealtimeChannel | null = null;
 
+  // Store active subscriptions for cleanup
+  const activeSubscriptions = new Set<RealtimeChannel>();
+
   const updatePresence = async (online: boolean): Promise<void> => {
     if (!user.value) return;
 
     try {
       await supabase.from('online_users').upsert({
         user_id: user.value.id,
-        username: user.value.username,
+        username: user.value.user_metadata?.username || '',
         online,
         last_seen: new Date().toISOString()
       });
@@ -64,22 +70,26 @@ export const usePresence = (): {
             .filter((user) => user.online);
 
           // Update allUsers with latest online status
-          allUsers.value = allUsers.value.map(user => ({
+          allUsers.value = allUsers.value.map((user) => ({
             ...user,
-            online: onlineUsers.value.some(u => u.user_id === user.user_id)
+            online: onlineUsers.value.some((u) => u.user_id === user.user_id)
           }));
         })
         .subscribe(async (status: string) => {
           if (status === 'SUBSCRIBED' && presenceChannel && user.value) {
             await presenceChannel.track({
               user_id: user.value.id,
-              username: user.value?.username,
+              username: user.value?.user_metadata?.username || '',
               online: true
             });
             await updatePresence(true);
           }
         });
 
+      // Add to active subscriptions
+      if (presenceChannel) {
+        activeSubscriptions.add(presenceChannel);
+      }
 
       // Setup presence heartbeat
       heartbeatInterval = setInterval(() => {
@@ -90,7 +100,8 @@ export const usePresence = (): {
       throw new Error('Failed to initialize presence tracking');
     }
 
-    _onlineUsersChannel = supabase.channel('online-users-channel')
+    _onlineUsersChannel = supabase
+      .channel('online-users-channel')
       .on(
         'postgres_changes',
         {
@@ -100,19 +111,24 @@ export const usePresence = (): {
         },
         async (payload: RealtimePostgresChangesPayload<OnlineUser>) => {
           // Update local users state
-          allUsers.value = allUsers.value.map(user => {
+          allUsers.value = allUsers.value.map((user) => {
             if (user.user_id === payload.new.user_id) {
               return {
                 ...user,
                 online: payload.new.online,
                 last_seen: payload.new.last_seen
               };
-            }cleanupCache
+            }
             return user;
           });
         }
       )
       .subscribe();
+
+    // Add to active subscriptions
+    if (_onlineUsersChannel) {
+      activeSubscriptions.add(_onlineUsersChannel);
+    }
   };
 
   const cleanupPresence = async (): Promise<void> => {
@@ -158,9 +174,9 @@ export const usePresence = (): {
           return {
             user_id: profile.user_id,
             username: profile.username,
-            online: onlineUser?.online || false,
+            online: Boolean(onlineUser?.online),
             last_seen: onlineUser?.last_seen || null
-          };
+          } as OnlineUser;
         });
       }
     } catch (error) {
@@ -173,15 +189,23 @@ export const usePresence = (): {
     return onlineUsers.value.some((u) => u.user_id === userId && u.online);
   };
 
-  const cleanupCache = () => {
-    messageCache.clear();
-    activeSubscriptions.forEach(ch => ch.unsubscribe());
-    activeSubscriptions.clear();
+  const cleanupCache = async (): Promise<void> => {
+    if (_onlineUsersChannel) {
+      await _onlineUsersChannel.unsubscribe();
+      _onlineUsersChannel = null;
+    }
+
+    if (activeSubscriptions.size > 0) {
+      for (const channel of activeSubscriptions) {
+        await channel.unsubscribe();
+      }
+      activeSubscriptions.clear();
+    }
   };
 
   return {
-    onlineUsers: readonly(onlineUsers),
-    allUsers: readonly(allUsers),
+    onlineUsers: readonly(onlineUsers) as Readonly<Ref<OnlineUser[]>>,
+    allUsers: readonly(allUsers) as Readonly<Ref<OnlineUser[]>>,
     setupPresence,
     cleanupPresence,
     cleanupCache,

@@ -3,8 +3,8 @@ import type { Database } from '~/types/supabase';
 import type { Channel } from '~/types/database.types';
 
 export const useDirectMessages = (): {
-  dmChannels: typeof dmChannels,
-  currentDMChannel: typeof currentDMChannel,
+  dmChannels: Ref<Channel[]>,
+  currentDMChannel: Ref<Channel | null>,
   loadDMChannels: () => Promise<void>,
   createOrGetDMChannel: (otherUserId: string) => Promise<Channel | null>
 } => {
@@ -14,7 +14,7 @@ export const useDirectMessages = (): {
   const dmChannels = ref<Channel[]>([]);
   const currentDMChannel = ref<Channel | null>(null);
 
-  const loadDMChannels = async () => {
+  const loadDMChannels = async (): Promise<void> => {
     if (!user.value?.id) return;
 
     const { data, error } = await supabase
@@ -24,21 +24,21 @@ export const useDirectMessages = (): {
       .contains('participants', [user.value.id]);
 
     if (!error && data) {
-      dmChannels.value = data;
+      dmChannels.value = data as Channel[];
     }
   };
 
-  const createOrGetDMChannel = async (otherUserId: string) => {
+  const createOrGetDMChannel = async (otherUserId: string): Promise<Channel | null> => {
     if (!user.value?.id) return null;
 
     try {
       const { data, error } = await supabase.rpc('get_or_create_dm_channel', {
-        user1_id: user.value.id, // Use user.value.id directly
+        user1_id: user.value.id,
         user2_id: otherUserId
       });
 
       if (error) throw error;
-      return data?.[0] || null;
+      return (data?.[0] as Channel) || null;
     } catch (error) {
       console.error('DM channel error:', error);
       return null;

@@ -1,35 +1,43 @@
-export interface Profile {
-  user_id: string;
-  username: string;
-  created_at?: string;
-  updated_at?: string;
-}
-
 export interface Channel {
   id: string;
   name: string;
-  description?: string;
+  description: string | null;
   created_at: string;
-  members?: string[];
+  members: string[] | null;
   type: 'public' | 'private' | 'dm';
-  participants?: string[];
+  participants?: string[]; // For DM channels
 }
 
-export interface MessageWithProfile {
+export interface Message {
   id: string;
   content: string;
   created_at: string;
   channel_id: string;
   user_id: string;
-  user: {} | null;
+}
+
+export interface MessageWithProfile extends Message {
+  profiles: {
+    username: string;
+  } | null;
+}
+
+export interface Profile {
+  user_id: string;
+  username: string;
+  avatar_url?: string | null;
+  created_at?: string;
+}
+
+export interface ProfileInsert {
+  user_id: string;
+  username: string;
+  avatar_url?: string | null;
 }
 
 export interface OnlineUser {
   user_id: string;
   username?: string;
   online: boolean;
-  last_seen?: string;
+  last_seen?: string | null;
 }
-
-
-export type ProfileInsert = Pick<Profile, 'user_id' | 'username'>;

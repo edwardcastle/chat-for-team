@@ -40,10 +40,13 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 defineProps({
   users: Array,
-  isUserOnline: Function
+  isUserOnline: {
+    type: Function as PropType<(userId: string) => boolean>,
+  required: true
+}
 });
 
 const emit = defineEmits(['select-dm']);
@@ -52,7 +55,7 @@ const { currentUserId } = useUser();
 const { createOrGetDMChannel } = useDirectMessages();
 
 
-const handleUserClick = async (user) => {
+const handleUserClick = async (user): void => {
   console.log('Initiating DM with:', user.user_id);
 
   try {
