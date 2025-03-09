@@ -7,6 +7,7 @@
         :users="allUsers"
         :current-channel="currentChannel"
         :is-user-online="isUserOnline"
+        :get-unread-count="getUnreadCount"
         @select-channel="selectChannel"
         @select-dm="handleDMSelect"
       />
@@ -41,7 +42,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue';
-import type { OnlineUser, Channel } from '~/types/database.types';
+import type { OnlineUser } from '~/types/database.types';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 
 const { currentUserId, isLoggedIn } = useUser();
@@ -64,11 +65,20 @@ const {
   loadMessages,
   sendMessage,
   setupRealtime,
-  scrollToBottom,
+  setupGlobalMessageListener,
+  cleanupGlobalMessageListener,
   clearCache: clearChatCache
 } = useChat();
 
 const { dmChannels, loadDMChannels } = useDirectMessages();
+
+const {
+  loadUnreadCounts,
+  setupUnreadTracking,
+  cleanupUnreadTracking,
+  markChannelAsRead,
+  getUnreadCount
+} = useUnreadMessages();
 
 const newMessage = ref<string>('');
 const loadingMessages = ref<boolean>(false);
@@ -78,6 +88,7 @@ const messagesListRef = ref<{
 
 // Track current active subscription
 const activeSubscription = ref<RealtimeChannel | null>(null);
+const globalSubscription = ref<RealtimeChannel | null>(null);
 
 const currentDMUser = computed<OnlineUser | null>(() => {
   if (
@@ -96,7 +107,21 @@ const currentDMUser = computed<OnlineUser | null>(() => {
 const initChat = async (): Promise<void> => {
   await loadAllUsers();
   try {
-    await Promise.all([loadChannels(), loadDMChannels(), setupPresence()]);
+    await Promise.all([
+      loadChannels(),
+      loadDMChannels(),
+      setupPresence(),
+      loadUnreadCounts()
+    ]);
+
+    // Set up tracking for unread messages
+    setupUnreadTracking();
+
+    // Set up the global message listener to catch messages for all channels
+    if (!globalSubscription.value) {
+      globalSubscription.value = setupGlobalMessageListener();
+    }
+
     if (channels.value.length > 0) {
       if (import.meta.client) {
         const savedChannel = JSON.parse(
@@ -142,6 +167,9 @@ const selectChannel = async (channelId: string): Promise<void> => {
 
     // Setup new subscription and store reference
     activeSubscription.value = setupRealtime();
+
+    // Mark this channel as read
+    await markChannelAsRead(channelId);
 
     await nextTick();
     // Scroll after messages are loaded and rendered
@@ -189,6 +217,9 @@ const handleDMSelect = async (channelId: string): Promise<void> => {
       // Setup new subscription and store reference
       activeSubscription.value = setupRealtime();
 
+      // Mark this channel as read
+      await markChannelAsRead(channelId);
+
       await nextTick();
       if (messagesListRef.value) {
         messagesListRef.value.scrollToBottom('smooth');
@@ -208,6 +239,8 @@ const handleOnline = async () => {
     try {
       loadingMessages.value = true;
       await loadMessages();
+      // Refresh unread counts
+      await loadUnreadCounts();
       if (messagesListRef.value) {
         messagesListRef.value.scrollToBottom('smooth');
       }
@@ -248,8 +281,10 @@ onMounted(() => {
 onBeforeUnmount(() => {
   cleanupPresence();
   cleanupRealtime();
+  cleanupUnreadTracking();
   clearChatCache();
   cleanupPresenceCache();
+  cleanupGlobalMessageListener();
   window.removeEventListener('online', handleOnline);
 });
 </script>

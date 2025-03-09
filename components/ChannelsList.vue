@@ -6,12 +6,20 @@
       :key="channel.id"
       class="flex items-center p-2 hover:bg-gray-100 rounded cursor-pointer transition-colors"
       :class="{ 'bg-gray-100': currentChannel?.id === channel.id }"
-      @click="$emit('select-channel', channel.id)"
+      @click="handleChannelClick(channel.id)"
     >
       <div class="channel-icon">
         #
       </div>
       <span class="ml-3 text-gray-700">{{ channel.name }}</span>
+
+      <!-- Unread message badge -->
+      <div
+        v-if="getUnreadCount(channel.id) > 0"
+        class="ml-auto bg-red-500 text-white text-xs font-medium px-2 py-0.5 rounded-full"
+      >
+        {{ getUnreadCount(channel.id) }}
+      </div>
     </div>
   </div>
 </template>
@@ -24,9 +32,18 @@ const props = defineProps({
   currentChannel: Object
 });
 
+const emit = defineEmits(['select-channel']);
+
+const { getUnreadCount, markChannelAsRead } = useUnreadMessages();
+
 const filteredChannels = computed(() =>
   props.channels?.filter(channel => channel.type !== 'dm') || []
 );
+
+const handleChannelClick = (channelId) => {
+  emit('select-channel', channelId);
+  markChannelAsRead(channelId);
+};
 
 </script>
 

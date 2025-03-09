@@ -16,6 +16,8 @@ export const useChat = (): {
   scrollToBottom: () => void;
   clearCache: () => void;
   syncPendingMessages: () => Promise<void>;
+  setupGlobalMessageListener: () => RealtimeChannel;
+  cleanupGlobalMessageListener: () => void;
 } => {
   const supabase = useSupabaseClient<Database>();
   const { user } = useUser();
@@ -26,6 +28,7 @@ export const useChat = (): {
   const channels = ref<Channel[]>([]);
   let currentChannel = ref<Channel | null>(null);
   const realtimeChannel: Ref<RealtimeChannel | null> = ref(null);
+  const globalMessageChannel: Ref<RealtimeChannel | null> = ref(null);
   if (import.meta.client) {
     currentChannel = ref<Channel | null>(
       JSON.parse(localStorage.getItem('currentChannel') || 'null')
@@ -293,6 +296,72 @@ export const useChat = (): {
     }
   };
 
+  // New function to handle messages for any channel
+  const addMessageToCache = async (channelId: string, newMessage: MessageWithProfile): Promise<void> => {
+    // Skip if we've already processed this message
+    if (processedMessageIds.has(newMessage.id)) {
+      return;
+    }
+
+    // Add to processed set
+    processedMessageIds.add(newMessage.id);
+
+    // Load user information if not present
+    if (!newMessage.profiles) {
+      const { data } = await supabase
+        .from('profiles')
+        .select('username')
+        .eq('user_id', newMessage.user_id)
+        .single();
+
+      if (data) {
+        newMessage.profiles = { username: data.username };
+      }
+    }
+
+    // Update cache for the specific channel
+    let channelMessages = messageCache.get(channelId) || [];
+    channelMessages = [...channelMessages, newMessage];
+    messageCache.set(channelId, channelMessages);
+
+    // If this is for the current channel, update the messages array too
+    if (currentChannel.value?.id === channelId) {
+      messages.value = [...messages.value, newMessage];
+      saveMessagesToLocalStorage(channelId, messages.value);
+      scrollToBottom();
+    } else {
+      // Save to localStorage even for non-active channels
+      saveMessagesToLocalStorage(channelId, channelMessages);
+    }
+  };
+
+  // Set up a global listener for all messages
+  const setupGlobalMessageListener = (): RealtimeChannel => {
+    if (globalMessageChannel.value) {
+      supabase.removeChannel(globalMessageChannel.value);
+      globalMessageChannel.value = null;
+    }
+
+    const channel = supabase
+      .channel('global-messages')
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'messages'
+        },
+        async (payload) => {
+          const newMessage = payload.new as MessageWithProfile;
+          await addMessageToCache(newMessage.channel_id, newMessage);
+        }
+      )
+      .subscribe();
+
+    globalMessageChannel.value = channel;
+    return channel;
+  };
+
   const setupRealtime = (): RealtimeChannel => {
     // Cleanup existing subscription first
     if (realtimeChannel.value) {
@@ -370,6 +439,13 @@ export const useChat = (): {
     }
   };
 
+  const cleanupGlobalMessageListener = (): void => {
+    if (globalMessageChannel.value) {
+      supabase.removeChannel(globalMessageChannel.value);
+      globalMessageChannel.value = null;
+    }
+  };
+
   // UI utilities
   const scrollToBottom = async (): Promise<void> => {
     await nextTick();
@@ -391,6 +467,8 @@ export const useChat = (): {
     setupRealtime,
     cleanupRealtime,
     scrollToBottom,
-    clearCache
+    clearCache,
+    setupGlobalMessageListener,
+    cleanupGlobalMessageListener
   };
 };

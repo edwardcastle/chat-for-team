@@ -41,3 +41,17 @@ export interface OnlineUser {
   online: boolean;
   last_seen?: string | null;
 }
+
+export interface UnreadCount {
+  channel_id: string;
+  user_id: string;
+  count: number;
+  last_read: string;
+}
+
+export interface ChannelRead {
+  id: string;
+  user_id: string;
+  channel_id: string;
+  last_read: string;
+}

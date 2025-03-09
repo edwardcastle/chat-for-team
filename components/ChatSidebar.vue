@@ -10,6 +10,7 @@
       :users="users"
       :dm-channels="dmChannels"
       :is-user-online="isUserOnline"
+      :get-unread-count="getUnreadCount"
       class="flex-1"
       @select-dm="$emit('select-dm', $event)"
     />
@@ -17,13 +18,26 @@
 </template>
 
 <script setup>
-defineProps({
+import { useUnreadMessages } from '~/composables/useUnreadMessage.js';
+
+const props = defineProps({
   channels: Array,
   dmChannels: Array,
   users: Array,
   currentChannel: Object,
-  isUserOnline: Function
+  isUserOnline: Function,
+  getUnreadCount: Function
 });
 
 defineEmits(['select-channel', 'select-dm']);
+
+watch(
+  () => props.dmChannels,
+  (newDmChannels) => {
+    if (newDmChannels.length > 0) {
+      useUnreadMessages().loadUnreadCounts();
+    }
+  },
+  { deep: true }
+);
 </script>
