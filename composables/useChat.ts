@@ -15,6 +15,7 @@ export const useChat = (): {
   cleanupRealtime: () => void;
   scrollToBottom: () => void;
   clearCache: () => void;
+  syncPendingMessages: () => Promise<void>;
 } => {
   const supabase = useSupabaseClient<Database>();
   const { user } = useUser();
@@ -32,8 +33,14 @@ export const useChat = (): {
   }
   const messagesContainer = ref<HTMLElement | null>(null);
 
+  // Track processed message IDs to prevent duplicates
+  const processedMessageIds = new Set<string>();
+
   // Local storage helpers
-  const saveMessagesToLocalStorage = (channelId: string, msgs: MessageWithProfile[]): void => {
+  const saveMessagesToLocalStorage = (
+    channelId: string,
+    msgs: MessageWithProfile[]
+  ): void => {
     if (import.meta.client) {
       try {
         localStorage.setItem(`messages_${channelId}`, JSON.stringify(msgs));
@@ -43,25 +50,14 @@ export const useChat = (): {
     }
   };
 
-  const getMessagesFromLocalStorage = (channelId: string): MessageWithProfile[] => {
-    if (import.meta.client) {
-      try {
-        const storedMessages = localStorage.getItem(`messages_${channelId}`);
-        return storedMessages ? JSON.parse(storedMessages) : [];
-      } catch (error) {
-        console.error('Failed to get messages from localStorage:', error);
-      }
-    }
-    return [];
-  };
-
   const clearCache = (): void => {
     messageCache.clear();
+    processedMessageIds.clear();
 
     // Only clear localStorage on client
     if (import.meta.client) {
       const keys = Object.keys(localStorage);
-      keys.forEach(key => {
+      keys.forEach((key) => {
         if (key.startsWith('messages_')) {
           localStorage.removeItem(key);
         }
@@ -72,7 +68,7 @@ export const useChat = (): {
   watch(
     currentChannel,
     (newVal) => {
-      if (import.meta.client) {
+      if (import.meta.client && newVal) {
         localStorage.setItem('currentChannel', JSON.stringify(newVal));
       }
     },
@@ -99,75 +95,95 @@ export const useChat = (): {
   const loadMessages = async (): Promise<void> => {
     if (!currentChannel.value?.id) return;
 
-    // First check memory cache
+    // Reset message IDs to prevent duplicates when switching channels
+    processedMessageIds.clear();
+
+    // Check cache first
     const cachedMessages = messageCache.get(currentChannel.value.id);
-
-    if (cachedMessages?.length) {
+    if (cachedMessages) {
       messages.value = cachedMessages;
-    } else {
-      // Try localStorage if not in memory
-      const storedMessages = getMessagesFromLocalStorage(currentChannel.value.id);
-      if (storedMessages.length > 0) {
-        messages.value = storedMessages;
-        messageCache.set(currentChannel.value.id, storedMessages);
-      } else {
-        messages.value = [];
-      }
+      return;
     }
 
-    try {
-      const { data, error } = await supabase
-        .from('messages')
-        .select(
-          `
-          id,
-          content,
-          created_at,
-          channel_id,
-          user_id,
-          profiles(username)`
-        )
-        .eq('channel_id', currentChannel.value.id)
-        .order('created_at', { ascending: true })
-        .limit(100);
+    // Load regular messages
+    const { data: serverMessages, error } = await supabase
+      .from('messages')
+      .select('*, profiles(username)')
+      .eq('channel_id', currentChannel.value.id)
+      .order('created_at', { ascending: true });
 
-      if (!error && data) {
-        const typedData = data as unknown as MessageWithProfile[];
-        messageCache.set(currentChannel.value.id, typedData);
-        saveMessagesToLocalStorage(currentChannel.value.id, typedData);
-        messages.value = typedData;
-      }
-    } catch (error) {
-      console.error('Message load error:', error);
+    if (error) {
+      console.error('Error loading messages:', error);
+      return;
     }
+
+    // Load pending messages
+    const { data: pendingData, error: pendingError } = await supabase
+      .from('pending_messages')
+      .select('*, profiles(username)')
+      .eq('channel_id', currentChannel.value.id)
+      .eq('user_id', user.value?.id || '');
+
+    if (pendingError) {
+      console.error('Error loading pending messages:', pendingError);
+    }
+
+    // Merge messages
+    const allMessages = [
+      ...(serverMessages || []),
+      ...(pendingData?.map((msg) => ({
+        ...msg,
+        status: 'sending',
+        id: `pending-${msg.id}`
+      })) || [])
+    ];
+
+    // Add all message IDs to the processed set
+    allMessages.forEach((msg) => processedMessageIds.add(msg.id));
+
+    // Update state
+    messages.value = allMessages;
+    messageCache.set(currentChannel.value.id, allMessages);
+    saveMessagesToLocalStorage(currentChannel.value.id, allMessages);
   };
+
+  if (import.meta.client) {
+    window.addEventListener('online', async () => {
+      await syncPendingMessages();
+      await loadMessages();
+    });
+  }
 
   const sendMessage = async (content: string): Promise<void> => {
     if (!content.trim() || !currentChannel.value?.id || !user.value?.id) return;
 
     const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 
+    // Add optimistic message
     const optimisticMessage: MessageWithProfile = {
       id: tempId,
       content,
       created_at: new Date().toISOString(),
       channel_id: currentChannel.value.id,
       user_id: user.value.id,
-      profiles: {
-        username: user.value.user_metadata?.username || 'You'
-      }
+      profiles: { username: user.value.user_metadata?.username || 'You' },
+      status: 'sending'
     };
 
-    const updatedMessages = [...messages.value, optimisticMessage];
-    messages.value = updatedMessages;
+    // Add to processed IDs to prevent duplication
+    processedMessageIds.add(tempId);
 
-    // Update cache with optimistic message
-    messageCache.set(currentChannel.value.id, updatedMessages);
-    saveMessagesToLocalStorage(currentChannel.value.id, updatedMessages);
+    // Update state
+    messages.value = [...messages.value, optimisticMessage];
 
-    await scrollToBottom();
+    // Update cache
+    if (currentChannel.value) {
+      messageCache.set(currentChannel.value.id, messages.value);
+      saveMessagesToLocalStorage(currentChannel.value.id, messages.value);
+    }
 
     try {
+      // Try direct insert
       const { data, error } = await supabase
         .from('messages')
         .insert({
@@ -175,26 +191,105 @@ export const useChat = (): {
           channel_id: currentChannel.value.id,
           user_id: user.value.id
         })
-        .select('id')
+        .select('id, created_at')
         .single();
 
       if (error) throw error;
 
-      const finalMessages = messages.value.map((msg) =>
-        msg.id === tempId ? { ...msg, id: data.id } : msg
+      // Add the real ID to processed IDs to prevent duplication from realtime events
+      processedMessageIds.add(data.id);
+
+      // Remove the temporary ID
+      processedMessageIds.delete(tempId);
+
+      // Update message status
+      messages.value = messages.value.map((msg) =>
+        msg.id === tempId
+          ? { ...msg, id: data.id, status: 'sent', created_at: data.created_at }
+          : msg
       );
 
-      messages.value = finalMessages;
-      messageCache.set(currentChannel.value.id, finalMessages);
-      saveMessagesToLocalStorage(currentChannel.value.id, finalMessages);
-
+      // Update cache
+      if (currentChannel.value) {
+        messageCache.set(currentChannel.value.id, messages.value);
+        saveMessagesToLocalStorage(currentChannel.value.id, messages.value);
+      }
     } catch (error) {
-      console.error('Message send error:', error);
-      const filteredMessages = messages.value.filter((msg) => msg.id !== tempId);
-      messages.value = filteredMessages;
-      messageCache.set(currentChannel.value.id, filteredMessages);
-      saveMessagesToLocalStorage(currentChannel.value.id, filteredMessages);
-      throw error;
+      console.log(error);
+      // Store in pending_messages if offline
+      if (!navigator.onLine) {
+        await storePendingMessage(content, tempId);
+      }
+      // Update message status
+      messages.value = messages.value.map((msg) =>
+        msg.id === tempId ? { ...msg, status: 'failed' } : msg
+      );
+
+      // Update cache
+      if (currentChannel.value) {
+        messageCache.set(currentChannel.value.id, messages.value);
+        saveMessagesToLocalStorage(currentChannel.value.id, messages.value);
+      }
+    }
+  };
+
+  const storePendingMessage = async (
+    content: string,
+    tempId: string
+  ): Promise<void> => {
+    if (!currentChannel.value?.id || !user.value?.id) return;
+
+    const { error } = await supabase.from('pending_messages').insert({
+      id: tempId,
+      content,
+      channel_id: currentChannel.value.id,
+      user_id: user.value.id,
+      retries: 0
+    });
+
+    if (error) console.error('Failed to store pending message:', error);
+  };
+
+  const syncPendingMessages = async (): Promise<void> => {
+    if (!user.value?.id) return;
+
+    const { data: pending, error } = await supabase
+      .from('pending_messages')
+      .select('*')
+      .eq('user_id', user.value.id)
+      .lte('retries', 3);
+
+    if (error) {
+      console.error('Failed to fetch pending messages:', error);
+      return;
+    }
+
+    if (!pending || pending.length === 0) return;
+
+    for (const msg of pending) {
+      try {
+        const { error } = await supabase.from('messages').insert({
+          content: msg.content,
+          channel_id: msg.channel_id,
+          user_id: msg.user_id
+        });
+
+        if (!error) {
+          await supabase.from('pending_messages').delete().eq('id', msg.id);
+        } else {
+          throw error;
+        }
+      } catch (error) {
+        console.error('Failed to sync pending message:', error);
+
+        await supabase
+          .from('pending_messages')
+          .update({
+            retries: msg.retries + 1,
+            last_attempt: new Date().toISOString()
+          })
+          .eq('id', msg.id);
+      }
     }
   };
 
@@ -219,18 +314,47 @@ export const useChat = (): {
           table: 'messages',
           filter: `channel_id=eq.${currentChannel.value.id}`
         },
-        (payload) => {
+        async (payload) => {
           const newMessage = payload.new as MessageWithProfile;
-          if (!messages.value.some((msg) => msg.id === newMessage.id)) {
-            const updatedMessages = [...messages.value, newMessage];
-            messages.value = updatedMessages;
 
-            // Update caches
-            messageCache.set(currentChannel.value!.id, updatedMessages);
-            saveMessagesToLocalStorage(currentChannel.value!.id, updatedMessages);
-
-            scrollToBottom();
+          // Skip if we've already processed this message (either optimistic or from previous load)
+          if (
+            processedMessageIds.has(newMessage.id) ||
+            messages.value.some((m) => m.id === newMessage.id)
+          ) {
+            return;
           }
+
+          // Add to processed set
+          processedMessageIds.add(newMessage.id);
+
+          // Load the user information for the message if not present
+          if (!newMessage.profiles) {
+            const { data } = await supabase
+              .from('profiles')
+              .select('username')
+              .eq('user_id', newMessage.user_id)
+              .single();
+
+            if (data) {
+              newMessage.profiles = { username: data.username };
+            }
+          }
+
+          // Add the new message to the list
+          const updatedMessages = [...messages.value, newMessage];
+          messages.value = updatedMessages;
+
+          // Update cache
+          if (currentChannel.value) {
+            messageCache.set(currentChannel.value.id, updatedMessages);
+            saveMessagesToLocalStorage(
+              currentChannel.value.id,
+              updatedMessages
+            );
+          }
+
+          scrollToBottom();
         }
       )
       .subscribe();
@@ -260,9 +384,10 @@ export const useChat = (): {
     channels,
     currentChannel,
     messagesContainer,
-    loadChannels,
-    loadMessages,
     sendMessage,
+    loadMessages,
+    loadChannels,
+    syncPendingMessages,
     setupRealtime,
     cleanupRealtime,
     scrollToBottom,

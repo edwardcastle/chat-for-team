@@ -1,32 +1,48 @@
 <template>
   <div class="flex mb-4" :class="{ 'justify-end': source.user_id === currentUserId }">
-    <div class="py-3 px-4 bg-white" :class="{ 'bg-chat-sent ml-auto': source.user_id === currentUserId }">
+    <div
+      class="py-3 px-4"
+      :class="[
+        source.user_id === currentUserId
+          ? 'bg-chat-sent ml-auto'
+          : 'bg-white'
+      ]"
+    >
       <p class="text-sm text-gray-500 mb-1">
-        {{ source.user?.username }}
+        {{ getUserName() }}
       </p>
       <p class="text-gray-800">{{ source.content }}</p>
       <div class="message-meta">
         <span class="timestamp">
           {{ formatTime(source.created_at) }}
         </span>
-        <span v-if="isCurrent" class="status-icons">✓✓</span>
+        <span v-if="isCurrent" class="status-icons">
+          <template v-if="source.status === 'sending'">🕒</template>
+          <template v-else-if="source.status === 'failed'">❌</template>
+          <template v-else>✓✓</template>
+        </span>
       </div>
     </div>
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 const { currentUserId } = useUser();
+
 const props = defineProps({
   source: {
-    type: Object,
+    type: Object as PropType<MessageWithProfile>,
     required: true
   }
 });
 
 const isCurrent = computed(
-  () => props.source.user_id === currentUserId
+  () => props.source.user_id === currentUserId.value
 );
+
+const getUserName = (): string => {
+  return props.source.profiles?.username || 'Unknown User';
+};
 </script>
 
 <style scoped>

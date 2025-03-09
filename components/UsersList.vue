@@ -41,12 +41,21 @@
 </template>
 
 <script setup lang="ts">
+import type { OnlineUser } from '~/types/database.types';
+
 defineProps({
-  users: Array,
+  users: {
+    type: Array as PropType<OnlineUser[]>,
+    default: () => []
+  },
+  dmChannels: {
+    type: Array,
+    default: () => []
+  },
   isUserOnline: {
     type: Function as PropType<(userId: string) => boolean>,
-  required: true
-}
+    required: true
+  }
 });
 
 const emit = defineEmits(['select-dm']);
@@ -54,13 +63,9 @@ const emit = defineEmits(['select-dm']);
 const { currentUserId } = useUser();
 const { createOrGetDMChannel } = useDirectMessages();
 
-
-const handleUserClick = async (user): void => {
-  console.log('Initiating DM with:', user.user_id);
-
+const handleUserClick = async (user: OnlineUser): Promise<void> => {
   try {
     const channel = await createOrGetDMChannel(user.user_id);
-    console.log('Created/fetched channel:', channel);
 
     if (channel?.id) {
       emit('select-dm', channel.id);

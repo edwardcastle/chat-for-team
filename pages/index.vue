@@ -41,6 +41,8 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue';
+import type { OnlineUser, Channel } from '~/types/database.types';
+import type { RealtimeChannel } from '@supabase/supabase-js';
 
 const { currentUserId, isLoggedIn } = useUser();
 const {
@@ -68,11 +70,14 @@ const {
 
 const { dmChannels, loadDMChannels } = useDirectMessages();
 
-const newMessage = ref('');
-const loadingMessages = ref(false);
+const newMessage = ref<string>('');
+const loadingMessages = ref<boolean>(false);
 const messagesListRef = ref<{
-  scrollToBottom: (behavior?: string) => void;
+  scrollToBottom: (behavior?: ScrollBehavior) => void;
 } | null>(null);
+
+// Track current active subscription
+const activeSubscription = ref<RealtimeChannel | null>(null);
 
 const currentDMUser = computed<OnlineUser | null>(() => {
   if (
@@ -99,7 +104,9 @@ const initChat = async (): Promise<void> => {
         );
 
         const targetChannel = savedChannel?.id
-          ? channels.value.find((c) => c.id === savedChannel.id)
+          ? [...channels.value, ...dmChannels.value].find(
+            (c) => c.id === savedChannel.id
+          )
           : channels.value[0];
 
         if (targetChannel) await selectChannel(targetChannel.id);
@@ -107,7 +114,6 @@ const initChat = async (): Promise<void> => {
         if (channels.value[0]) await selectChannel(channels.value[0].id);
       }
     }
-    setupRealtime();
   } catch (error) {
     console.error('Failed to initialize chat:', error);
   }
@@ -118,17 +124,30 @@ const selectChannel = async (channelId: string): Promise<void> => {
   const channel = allChannels.find((c) => c.id === channelId);
 
   if (!channel) return;
-  cleanupRealtime();
+
+  // Cleanup existing subscription
+  if (activeSubscription.value) {
+    cleanupRealtime();
+    activeSubscription.value = null;
+  }
+
   currentChannel.value = channel;
   loadingMessages.value = true;
 
   try {
+    // Clear messages before loading new ones to prevent flickering
     messages.value = [];
     await loadMessages();
     await nextTick();
-    setupRealtime();
+
+    // Setup new subscription and store reference
+    activeSubscription.value = setupRealtime();
+
     await nextTick();
-    scrollToBottom();
+    // Scroll after messages are loaded and rendered
+    if (messagesListRef.value) {
+      messagesListRef.value.scrollToBottom('smooth');
+    }
   } finally {
     loadingMessages.value = false;
   }
@@ -140,7 +159,9 @@ const handleSendMessage = async (): Promise<void> => {
     await sendMessage(newMessage.value);
     newMessage.value = '';
     await nextTick();
-    scrollToBottom();
+    if (messagesListRef.value) {
+      messagesListRef.value.scrollToBottom('smooth');
+    }
   } catch (error) {
     console.error('Failed to send message:', error);
   }
@@ -148,6 +169,12 @@ const handleSendMessage = async (): Promise<void> => {
 
 const handleDMSelect = async (channelId: string): Promise<void> => {
   try {
+    // Cleanup existing subscription
+    if (activeSubscription.value) {
+      cleanupRealtime();
+      activeSubscription.value = null;
+    }
+
     messages.value = [];
     loadingMessages.value = true;
 
@@ -158,11 +185,14 @@ const handleDMSelect = async (channelId: string): Promise<void> => {
     if (channel) {
       currentChannel.value = channel;
       await loadMessages();
-      setupRealtime();
+
+      // Setup new subscription and store reference
+      activeSubscription.value = setupRealtime();
+
       await nextTick();
-      await nextTick();
-      scrollToBottom();
-      setTimeout(() => scrollToBottom(), 100);
+      if (messagesListRef.value) {
+        messagesListRef.value.scrollToBottom('smooth');
+      }
     } else {
       console.error('DM channel not found:', channelId);
     }
@@ -173,22 +203,53 @@ const handleDMSelect = async (channelId: string): Promise<void> => {
   }
 };
 
+const handleOnline = async () => {
+  if (currentChannel.value) {
+    try {
+      loadingMessages.value = true;
+      await loadMessages();
+      if (messagesListRef.value) {
+        messagesListRef.value.scrollToBottom('smooth');
+      }
+    } catch (error) {
+      console.error('Failed to reload messages:', error);
+    } finally {
+      loadingMessages.value = false;
+    }
+  }
+};
+
 const channelMembersOnline = computed((): number => {
-  if (currentChannel.value?.type === 'dm') {
+  if (!currentChannel.value) return 0;
+
+  if (currentChannel.value.type === 'dm') {
     return currentDMUser.value?.online ? 1 : 0;
   }
+
   return (
-    currentChannel.value?.members?.filter((member) =>
+    currentChannel.value.members?.filter((member) =>
       onlineUsers.value.some((u) => u.user_id === member)
     ).length || 0
   );
 });
 
-onMounted(initChat);
+if (import.meta.client) {
+  window.addEventListener('online', () => {
+    const { syncPendingMessages } = useChat();
+    syncPendingMessages();
+  });
+}
+
+onMounted(() => {
+  initChat();
+  window.addEventListener('online', handleOnline);
+});
+
 onBeforeUnmount(() => {
   cleanupPresence();
   cleanupRealtime();
   clearChatCache();
   cleanupPresenceCache();
+  window.removeEventListener('online', handleOnline);
 });
 </script>

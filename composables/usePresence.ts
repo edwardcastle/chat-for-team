@@ -37,8 +37,7 @@ export const usePresence = (): {
 
     try {
       await supabase.from('online_users').upsert({
-        user_id: user.value.id,
-        username: user.value.user_metadata?.username || '',
+        user_id: user.value.id, // Use user_id as foreign key
         online,
         last_seen: new Date().toISOString()
       });
@@ -47,7 +46,6 @@ export const usePresence = (): {
       throw new Error('Failed to update presence status');
     }
   };
-
   const debouncedPresenceUpdate = useDebounceFn(updatePresence, 5000);
 
   const setupPresence = async (): Promise<void> => {
@@ -79,7 +77,6 @@ export const usePresence = (): {
           if (status === 'SUBSCRIBED' && presenceChannel && user.value) {
             await presenceChannel.track({
               user_id: user.value.id,
-              username: user.value?.user_metadata?.username || '',
               online: true
             });
             await updatePresence(true);
@@ -158,7 +155,6 @@ export const usePresence = (): {
   };
 
   const loadAllUsers = async (): Promise<void> => {
-    if (import.meta.server) return;
     try {
       const { data: profiles } = await supabase
         .from('profiles')
@@ -181,7 +177,6 @@ export const usePresence = (): {
       }
     } catch (error) {
       console.error('User loading failed:', error);
-      throw new Error('Failed to load user list');
     }
   };
 
