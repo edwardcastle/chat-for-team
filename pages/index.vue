@@ -13,12 +13,14 @@
       />
 
       <div class="flex-1 flex flex-col">
-        <ChatHeader
-          v-if="currentChannel"
-          :channel="currentChannel"
-          :online-count="channelMembersOnline"
-          :other-user="currentDMUser"
-        />
+        <ClientOnly>
+          <ChatHeader
+            v-if="currentChannel"
+            :channel="currentChannel"
+            :online-count="channelMembersOnline"
+            :other-user="currentDMUser"
+          />
+        </ClientOnly>
 
         <ClientOnly>
           <MessagesList
@@ -41,11 +43,15 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue';
-import type { OnlineUser } from '~/types/database.types';
+import type {
+  OnlineUser,
+  MessageWithProfile,
+  Channel
+} from '~/types/database.types';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 
 const { currentUserId, isLoggedIn } = useUser();
+
 const {
   onlineUsers,
   allUsers,
@@ -77,7 +83,8 @@ const {
   setupUnreadTracking,
   cleanupUnreadTracking,
   markChannelAsRead,
-  getUnreadCount
+  getUnreadCount,
+  updateDMChannels
 } = useUnreadMessages();
 
 const newMessage = ref<string>('');
@@ -98,9 +105,15 @@ const currentDMUser = computed<OnlineUser | null>(() => {
     return null;
   }
 
-  const otherUserId = currentChannel.value.participants.find(
-    (id) => id !== currentUserId.value
+  const array =
+    currentChannel.value.participants.length === 1
+      ? currentChannel.value.participants[0]
+      : currentChannel.value.participants;
+
+  const otherUserId = Array.from(array).find(
+    (id: string) => id !== currentUserId.value
   );
+
   return allUsers.value.find((u) => u.user_id === otherUserId) || null;
 });
 
@@ -130,8 +143,8 @@ const initChat = async (): Promise<void> => {
 
         const targetChannel = savedChannel?.id
           ? [...channels.value, ...dmChannels.value].find(
-            (c) => c.id === savedChannel.id
-          )
+              (c) => c.id === savedChannel.id
+            )
           : channels.value[0];
 
         if (targetChannel) await selectChannel(targetChannel.id);
@@ -273,9 +286,12 @@ if (import.meta.client) {
   });
 }
 
-onMounted(() => {
-  initChat();
+onMounted(async () => {
+  await initChat();
   window.addEventListener('online', handleOnline);
+  await loadDMChannels();
+  updateDMChannels(dmChannels.value);
+  setupUnreadTracking();
 });
 
 onBeforeUnmount(() => {

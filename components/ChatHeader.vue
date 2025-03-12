@@ -1,7 +1,7 @@
 <template>
   <div class="p-4 bg-gray-50 border-b flex items-center">
     <div class="flex items-center space-x-3">
-      <div class="channel-avatar">
+      <div class="avatar">
         {{ channelIcon }}
       </div>
       <div>
@@ -16,6 +16,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue';
+import type { OnlineUser } from '~/types/database.types';
 
 const props = defineProps({
   channel: Object,
