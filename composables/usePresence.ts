@@ -158,7 +158,8 @@ export const usePresence = (): {
     try {
       const { data: profiles } = await supabase
         .from('profiles')
-        .select('user_id, username');
+        .select('user_id, username')
+        .order('username', { ascending: true });
 
       const { data: online } = await supabase
         .from('online_users')

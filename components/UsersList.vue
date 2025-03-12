@@ -41,15 +41,11 @@
 </template>
 
 <script setup lang="ts">
-import type { OnlineUser } from '~/types/database.types';
+import type { Channel, OnlineUser } from '~/types/database.types';
 
 const props = defineProps({
   users: {
     type: Array as PropType<OnlineUser[]>,
-    default: () => []
-  },
-  dmChannels: {
-    type: Array,
     default: () => []
   },
   isUserOnline: {
@@ -58,6 +54,10 @@ const props = defineProps({
   },
   getUnreadCount: {
     type: Function as PropType<(channelId: string) => number>,
+    required: true
+  },
+  dmChannels: {
+    type: Array as PropType<Channel[]>,
     required: true
   }
 });
@@ -68,46 +68,20 @@ const { currentUserId } = useUser();
 const { createOrGetDMChannel } = useDirectMessages();
 const { markChannelAsRead } = useUnreadMessages();
 
-
 const getUserUnreadCount = (userId: string): number => {
-  try {
-    const dmChannel = props.dmChannels.find((channel) => {
-      if (channel.type !== 'dm') return false;
-
-      // Handle both string arrays and JSON-serialized arrays
-      let participants: string[] = [];
-      if (typeof channel.participants === 'string') {
-        try {
-          participants = JSON.parse(channel.participants);
-        } catch (e) {
-          console.error('Error parsing participants:', e);
-        }
-      } else if (Array.isArray(channel.participants)) {
-        participants = channel.participants;
-      }
-
-      return participants.includes(userId);
-    });
-
-    if (dmChannel && props.getUnreadCount) {
-      const count = props.getUnreadCount(dmChannel.id);
-      console.log(`Unread count for DM ${dmChannel.id}: ${count}`);
-      return count;
-    }
-    return 0;
-  } catch (error) {
-    console.error('Error getting unread count:', error);
-    return 0;
-  }
+  const dmChannel = props.dmChannels.find(c =>
+    c.type === 'dm' &&
+    c.participants.includes(userId)
+  );
+  return dmChannel ? props.getUnreadCount(dmChannel.id) : 0;
 };
 
 const handleUserClick = async (user: OnlineUser): Promise<void> => {
   try {
     const channel = await createOrGetDMChannel(user.user_id);
-
     if (channel?.id) {
       // Mark as read when selecting the channel
-      markChannelAsRead(channel.id);
+      await markChannelAsRead(channel.id);
       emit('select-dm', channel.id);
     }
   } catch (error) {

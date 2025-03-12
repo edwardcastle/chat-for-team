@@ -3,10 +3,10 @@ import type { Database } from '~/types/supabase';
 import type { Channel } from '~/types/database.types';
 
 export const useDirectMessages = (): {
-  dmChannels: Ref<Channel[]>,
-  currentDMChannel: Ref<Channel | null>,
-  loadDMChannels: () => Promise<void>,
-  createOrGetDMChannel: (otherUserId: string) => Promise<Channel | null>
+  dmChannels: Ref<Channel[]>;
+  currentDMChannel: Ref<Channel | null>;
+  loadDMChannels: () => Promise<void>;
+  createOrGetDMChannel: (otherUserId: string) => Promise<Channel | null>;
 } => {
   const supabase = useSupabaseClient<Database>();
   const { user } = useUser();
@@ -28,7 +28,9 @@ export const useDirectMessages = (): {
     }
   };
 
-  const createOrGetDMChannel = async (otherUserId: string): Promise<Channel | null> => {
+  const createOrGetDMChannel = async (
+    otherUserId: string
+  ): Promise<Channel | null> => {
     if (!user.value?.id) return null;
 
     try {
@@ -38,7 +40,12 @@ export const useDirectMessages = (): {
       });
 
       if (error) throw error;
-      return (data?.[0] as Channel) || null;
+      const newChannel = data?.[0] as Channel;
+      if (newChannel && !dmChannels.value.some((c) => c.id === newChannel.id)) {
+        dmChannels.value = [...dmChannels.value, newChannel];
+      }
+      return newChannel || null;
+      // return (data?.[0] as Channel) || null;
     } catch (error) {
       console.error('DM channel error:', error);
       return null;

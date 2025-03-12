@@ -5,7 +5,7 @@ export interface Channel {
   created_at: string;
   members: string[] | null;
   type: 'public' | 'private' | 'dm';
-  participants?: string[]; // For DM channels
+  participants?: string[string[]]; // For DM channels
 }
 
 export interface Message {

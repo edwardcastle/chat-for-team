@@ -3,6 +3,11 @@ import type { RealtimeChannel } from '@supabase/supabase-js';
 import type { Database } from '~/types/supabase';
 import type { MessageWithProfile, Channel } from '~/types/database.types';
 
+interface MessageCache {
+  timestamp: number;
+  messages: MessageWithProfile[];
+}
+
 export const useChat = (): {
   messages: Ref<MessageWithProfile[]>;
   channels: Ref<Channel[]>;
@@ -35,23 +40,10 @@ export const useChat = (): {
     );
   }
   const messagesContainer = ref<HTMLElement | null>(null);
+  const loadingMoreMessages = ref(false);
 
   // Track processed message IDs to prevent duplicates
   const processedMessageIds = new Set<string>();
-
-  // Local storage helpers
-  const saveMessagesToLocalStorage = (
-    channelId: string,
-    msgs: MessageWithProfile[]
-  ): void => {
-    if (import.meta.client) {
-      try {
-        localStorage.setItem(`messages_${channelId}`, JSON.stringify(msgs));
-      } catch (error) {
-        console.error('Failed to save messages to localStorage:', error);
-      }
-    }
-  };
 
   const clearCache = (): void => {
     messageCache.clear();
@@ -95,59 +87,53 @@ export const useChat = (): {
     }
   };
 
-  const loadMessages = async (): Promise<void> => {
+  const loadMessages = async (
+    limit = 50,
+    beforeTimestamp = null
+  ): Promise<void> => {
     if (!currentChannel.value?.id) return;
-
-    // Reset message IDs to prevent duplicates when switching channels
-    processedMessageIds.clear();
 
     // Check cache first
     const cachedMessages = messageCache.get(currentChannel.value.id);
-    if (cachedMessages) {
-      messages.value = cachedMessages;
+    if (cachedMessages && !beforeTimestamp) {
+      console.warn(cachedMessages, 'cachedMessages');
+      messages.value = cachedMessages?.messages;
       return;
     }
 
-    // Load regular messages
-    const { data: serverMessages, error } = await supabase
+    // Build query
+    let query = supabase
       .from('messages')
       .select('*, profiles(username)')
       .eq('channel_id', currentChannel.value.id)
-      .order('created_at', { ascending: true });
+      .order('created_at', { ascending: false })
+      .limit(limit);
+
+    // Add timestamp filter for pagination
+    if (beforeTimestamp) {
+      query = query.lt('created_at', beforeTimestamp);
+    }
+
+    const { data: serverMessages, error } = await query;
 
     if (error) {
       console.error('Error loading messages:', error);
       return;
     }
 
-    // Load pending messages
-    const { data: pendingData, error: pendingError } = await supabase
-      .from('pending_messages')
-      .select('*, profiles(username)')
-      .eq('channel_id', currentChannel.value.id)
-      .eq('user_id', user.value?.id || '');
-
-    if (pendingError) {
-      console.error('Error loading pending messages:', pendingError);
-    }
-
-    // Merge messages
-    const allMessages = [
-      ...(serverMessages || []),
-      ...(pendingData?.map((msg) => ({
-        ...msg,
-        status: 'sending',
-        id: `pending-${msg.id}`
-      })) || [])
-    ];
-
-    // Add all message IDs to the processed set
-    allMessages.forEach((msg) => processedMessageIds.add(msg.id));
+    // Reverse to get ascending order
+    const orderedMessages = serverMessages?.reverse() || [];
 
     // Update state
-    messages.value = allMessages;
-    messageCache.set(currentChannel.value.id, allMessages);
-    saveMessagesToLocalStorage(currentChannel.value.id, allMessages);
+    messages.value = beforeTimestamp
+      ? [...orderedMessages, ...messages.value]
+      : orderedMessages;
+
+    if (!beforeTimestamp) {
+      messageCache.set(currentChannel.value.id, messages.value);
+      saveMessagesToLocalStorage(currentChannel.value.id, messages.value);
+    }
+    cacheMessage(currentChannel.value.id, messages.value);
   };
 
   if (import.meta.client) {
@@ -157,14 +143,19 @@ export const useChat = (): {
     });
   }
 
-  const sendMessage = async (content: string): Promise<void> => {
+  const sendMessage = async (
+    content: string,
+    tempId: string
+  ): Promise<void> => {
     if (!content.trim() || !currentChannel.value?.id || !user.value?.id) return;
 
-    const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+    // Use provided tempId or generate a new one
+    const messageId =
+      tempId || `temp-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 
     // Add optimistic message
-    const optimisticMessage: MessageWithProfile = {
-      id: tempId,
+    const optimisticMessage = {
+      id: messageId,
       content,
       created_at: new Date().toISOString(),
       channel_id: currentChannel.value.id,
@@ -173,20 +164,20 @@ export const useChat = (): {
       status: 'sending'
     };
 
-    // Add to processed IDs to prevent duplication
-    processedMessageIds.add(tempId);
-
-    // Update state
+    // Update state and cache
+    processedMessageIds.add(messageId);
     messages.value = [...messages.value, optimisticMessage];
 
-    // Update cache
     if (currentChannel.value) {
       messageCache.set(currentChannel.value.id, messages.value);
       saveMessagesToLocalStorage(currentChannel.value.id, messages.value);
     }
 
     try {
-      // Try direct insert
+      // Try to send message with timeout
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000); // 5-second timeout
+
       const { data, error } = await supabase
         .from('messages')
         .insert({
@@ -194,41 +185,41 @@ export const useChat = (): {
           channel_id: currentChannel.value.id,
           user_id: user.value.id
         })
+        .abortSignal(controller.signal)
         .select('id, created_at')
         .single();
 
+      clearTimeout(timeoutId);
+
       if (error) throw error;
 
-      // Add the real ID to processed IDs to prevent duplication from realtime events
+      // Success handling
       processedMessageIds.add(data.id);
+      processedMessageIds.delete(messageId);
 
-      // Remove the temporary ID
-      processedMessageIds.delete(tempId);
-
-      // Update message status
       messages.value = messages.value.map((msg) =>
-        msg.id === tempId
+        msg.id === messageId
           ? { ...msg, id: data.id, status: 'sent', created_at: data.created_at }
           : msg
       );
-
-      // Update cache
-      if (currentChannel.value) {
-        messageCache.set(currentChannel.value.id, messages.value);
-        saveMessagesToLocalStorage(currentChannel.value.id, messages.value);
-      }
     } catch (error) {
-      console.log(error);
-      // Store in pending_messages if offline
-      if (!navigator.onLine) {
-        await storePendingMessage(content, tempId);
-      }
-      // Update message status
-      messages.value = messages.value.map((msg) =>
-        msg.id === tempId ? { ...msg, status: 'failed' } : msg
-      );
+      console.error('Message send error:', error);
 
-      // Update cache
+      // Check if we're online
+      if (!navigator.onLine) {
+        await storePendingMessage(content, messageId);
+
+        messages.value = messages.value.map((msg) =>
+          msg.id === messageId ? { ...msg, status: 'pending' } : msg
+        );
+      } else {
+        // We're online but still failed
+        messages.value = messages.value.map((msg) =>
+          msg.id === messageId ? { ...msg, status: 'failed' } : msg
+        );
+      }
+    } finally {
+      // Always update the cache
       if (currentChannel.value) {
         messageCache.set(currentChannel.value.id, messages.value);
         saveMessagesToLocalStorage(currentChannel.value.id, messages.value);
@@ -262,42 +253,52 @@ export const useChat = (): {
       .eq('user_id', user.value.id)
       .lte('retries', 3);
 
-    if (error) {
-      console.error('Failed to fetch pending messages:', error);
-      return;
-    }
+    if (error || !pending || pending.length === 0) return;
 
-    if (!pending || pending.length === 0) return;
+    // Prepare batch of messages
+    const messagesToInsert = pending.map((msg) => ({
+      content: msg.content,
+      channel_id: msg.channel_id,
+      user_id: msg.user_id
+    }));
 
-    for (const msg of pending) {
-      try {
-        const { error } = await supabase.from('messages').insert({
-          content: msg.content,
-          channel_id: msg.channel_id,
-          user_id: msg.user_id
-        });
+    // Batch insert
+    const { data, error: insertError } = await supabase
+      .from('messages')
+      .insert(messagesToInsert)
+      .select('id, channel_id');
 
-        if (!error) {
-          await supabase.from('pending_messages').delete().eq('id', msg.id);
-        } else {
-          throw error;
-        }
-      } catch (error) {
-        console.error('Failed to sync pending message:', error);
+    if (!insertError && data) {
+      // Map successful inserts to their original pending messages
+      const successfulIds = new Set(data.map((m) => m.channel_id));
 
-        await supabase
-          .from('pending_messages')
-          .update({
-            retries: msg.retries + 1,
-            last_attempt: new Date().toISOString()
-          })
-          .eq('id', msg.id);
+      // Delete all successful pending messages in one operation
+      await supabase
+        .from('pending_messages')
+        .delete()
+        .in('channel_id', [...successfulIds]);
+
+      // Update retries for failed messages
+      const failedMsgs = pending.filter(
+        (msg) => !successfulIds.has(msg.channel_id)
+      );
+      if (failedMsgs.length > 0) {
+        const updates = failedMsgs.map((msg) => ({
+          id: msg.id,
+          retries: msg.retries + 1,
+          last_attempt: new Date().toISOString()
+        }));
+
+        await supabase.from('pending_messages').upsert(updates);
       }
     }
   };
 
   // New function to handle messages for any channel
-  const addMessageToCache = async (channelId: string, newMessage: MessageWithProfile): Promise<void> => {
+  const addMessageToCache = async (
+    channelId: string,
+    newMessage: MessageWithProfile
+  ): Promise<void> => {
     // Skip if we've already processed this message
     if (processedMessageIds.has(newMessage.id)) {
       return;
@@ -328,9 +329,8 @@ export const useChat = (): {
     if (currentChannel.value?.id === channelId) {
       messages.value = [...messages.value, newMessage];
       saveMessagesToLocalStorage(channelId, messages.value);
-      scrollToBottom();
+      await scrollToBottom();
     } else {
-      // Save to localStorage even for non-active channels
       saveMessagesToLocalStorage(channelId, channelMessages);
     }
   };
@@ -353,6 +353,7 @@ export const useChat = (): {
         },
         async (payload) => {
           const newMessage = payload.new as MessageWithProfile;
+          if (!processMessage(newMessage)) return;
           await addMessageToCache(newMessage.channel_id, newMessage);
         }
       )
@@ -385,7 +386,7 @@ export const useChat = (): {
         },
         async (payload) => {
           const newMessage = payload.new as MessageWithProfile;
-
+          if (!processMessage(newMessage)) return;
           // Skip if we've already processed this message (either optimistic or from previous load)
           if (
             processedMessageIds.has(newMessage.id) ||
@@ -446,6 +447,38 @@ export const useChat = (): {
     }
   };
 
+  const processMessage = (
+    newMessage: MessageWithProfile,
+    skipDupeCheck = false
+  ): boolean => {
+    if (!skipDupeCheck) {
+      const isDuplicate = messages.value.some(
+        (msg) =>
+          msg.id === newMessage.id ||
+          (msg.content === newMessage.content &&
+            Math.abs(
+              new Date(msg.created_at).getTime() -
+                new Date(newMessage.created_at).getTime()
+            ) < 1000)
+      );
+
+      if (isDuplicate) return false;
+    }
+    return true;
+  };
+
+  const cacheMessage = (
+    channelId: string,
+    messageList: MessageWithProfile[]
+  ): void => {
+    const cacheData = {
+      timestamp: Date.now(),
+      messages: messageList
+    };
+    messageCache.set(channelId, cacheData);
+    saveMessagesToLocalStorage(channelId, cacheData);
+  };
+
   // UI utilities
   const scrollToBottom = async (): Promise<void> => {
     await nextTick();
@@ -460,6 +493,7 @@ export const useChat = (): {
     channels,
     currentChannel,
     messagesContainer,
+    loadingMoreMessages,
     sendMessage,
     loadMessages,
     loadChannels,

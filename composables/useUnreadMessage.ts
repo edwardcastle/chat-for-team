@@ -1,6 +1,9 @@
 import { useSupabaseClient } from '#imports';
+import { ref, computed } from 'vue';
 import type { Database } from '~/types/supabase';
-import type { Channel, UnreadCount } from '~/types/database.types';
+import type { Channel } from '~/types/database.types';
+import { useUser } from './useUser';
+import { useChat } from './useChat';
 
 export const useUnreadMessages = () => {
   const supabase = useSupabaseClient<Database>();
@@ -10,6 +13,7 @@ export const useUnreadMessages = () => {
   // Store unread counts by channel ID
   const unreadCounts = ref<Record<string, number>>({});
   const lastReadTimestamps = ref<Record<string, string>>({});
+  const dmChannels = ref<Channel[]>([]);
 
   // Track active subscriptions for cleanup
   const activeSubscriptions = new Set<any>();
@@ -28,19 +32,19 @@ export const useUnreadMessages = () => {
       if (lastReadError) throw lastReadError;
 
       // Store last read timestamps
+      const newTimestamps: Record<string, string> = {};
       if (lastRead) {
         lastRead.forEach((item) => {
-          lastReadTimestamps.value[item.channel_id] = item.last_read;
+          newTimestamps[item.channel_id] = item.last_read;
         });
       }
+      lastReadTimestamps.value = newTimestamps;
 
       // Get unread counts for each channel
       const counts: Record<string, number> = {};
 
       // For each channel with a last_read timestamp, count newer messages
-      for (const [channelId, timestamp] of Object.entries(
-        lastReadTimestamps.value
-      )) {
+      for (const [channelId, timestamp] of Object.entries(newTimestamps)) {
         const { count, error } = await supabase
           .from('messages')
           .select('*', { count: 'exact', head: true })
@@ -82,15 +86,30 @@ export const useUnreadMessages = () => {
             // Ignore user's own messages
             if (message.user_id === user.value?.id) return;
 
-            // If this message is for a channel the user has opened before
+            // Check if this is a DM channel
+            const isDM = dmChannels.value.some(
+              c => c.id === message.channel_id && c.type === 'dm'
+            );
+
+            // Handle DM-specific logic
+            if (isDM) {
+              const dmChannel = dmChannels.value.find(c => c.id === message.channel_id);
+              if (dmChannel) {
+                const otherUserId = dmChannel.participants.find(id => id !== user.value?.id);
+                if (otherUserId) {
+                  unreadCounts.value[message.channel_id] =
+                    (unreadCounts.value[message.channel_id] || 0) + 1;
+                }
+              }
+            }
+
+            // General channel logic
             if (lastReadTimestamps.value[message.channel_id] !== undefined) {
-              // If this is not the current active channel, increment unread count
               if (currentChannel.value?.id !== message.channel_id) {
                 unreadCounts.value[message.channel_id] =
                   (unreadCounts.value[message.channel_id] || 0) + 1;
               }
             } else {
-              // This is a channel the user hasn't viewed yet
               unreadCounts.value[message.channel_id] =
                 (unreadCounts.value[message.channel_id] || 0) + 1;
             }
@@ -138,8 +157,28 @@ export const useUnreadMessages = () => {
       console.warn('Attempted to get unread count for undefined channelId');
       return 0;
     }
-    console.log(`Getting unread count for channel ${channelId}: ${unreadCounts.value[channelId] || 0}`);
     return unreadCounts.value[channelId] || 0;
+  };
+
+  // Get unread counts mapped to user IDs for DMs
+  const getUserUnreadCounts = computed(() => {
+    const counts: Record<string, number> = {};
+
+    dmChannels.value.forEach((channel) => {
+      if (channel.type === 'dm') {
+        const otherUserId = channel.participants.find(id => id !== user.value?.id);
+        if (otherUserId) {
+          counts[otherUserId] = unreadCounts.value[channel.id] || 0;
+        }
+      }
+    });
+
+    return counts;
+  });
+
+  // Update DM channels list
+  const updateDMChannels = (newDmChannels: Channel[]): void => {
+    dmChannels.value = newDmChannels;
   };
 
   // Cleanup function
@@ -152,10 +191,13 @@ export const useUnreadMessages = () => {
 
   return {
     unreadCounts: readonly(unreadCounts),
+    lastReadTimestamps: readonly(lastReadTimestamps),
     loadUnreadCounts,
     setupUnreadTracking,
     cleanupUnreadTracking,
     markChannelAsRead,
-    getUnreadCount
+    getUnreadCount,
+    getUserUnreadCounts,
+    updateDMChannels
   };
 };

@@ -38,6 +38,6 @@ watch(
       useUnreadMessages().loadUnreadCounts();
     }
   },
-  { deep: true }
+  { deep: true, immediate: true }
 );
 </script>
