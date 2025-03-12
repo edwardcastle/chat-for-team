@@ -9,7 +9,7 @@
       ]"
     >
       <p class="text-sm text-gray-500 mb-1">
-        {{ getUserName() }}
+        {{ source.user_id === currentUserId ? 'You' : getUserName() }}
       </p>
       <p class="text-gray-800">{{ source.content }}</p>
       <div class="message-meta">
@@ -27,6 +27,8 @@
 </template>
 
 <script setup lang="ts">
+import type { MessageWithProfile } from '~/types/database.types';
+
 const { currentUserId } = useUser();
 
 const props = defineProps({

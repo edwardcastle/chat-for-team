@@ -47,7 +47,7 @@ const handleVirtualScroll = async (event) => {
     props.messages.length >= 50
   ) {
     loadingMoreMessages.value = true;
-    if (props.messages.length > 0) {
+    if (props.messages?.length > 0) {
       const oldestMessage = props.messages.value[0];
       if (oldestMessage?.created_at) {
         await loadMessages(50, oldestMessage.created_at);
