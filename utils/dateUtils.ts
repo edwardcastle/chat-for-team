@@ -5,8 +5,7 @@ export const formatLastSeen = (timestamp: string | Date | null): string => {
   const now = new Date();
   const options: Intl.DateTimeFormatOptions = {
     hour: '2-digit',
-    minute: '2-digit',
-    timeZoneName: 'short'
+    minute: '2-digit'
   };
 
   // Calculate differences
@@ -32,8 +31,7 @@ export const formatLastSeen = (timestamp: string | Date | null): string => {
   if (date.getFullYear() === now.getFullYear()) {
     return `${date.toLocaleDateString('en-US', {
       month: 'long',
-      day: 'numeric',
-      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone
+      day: 'numeric'
     })} at ${timeString}`;
   }
 
@@ -41,8 +39,7 @@ export const formatLastSeen = (timestamp: string | Date | null): string => {
   return `${date.toLocaleDateString('en-US', {
     year: 'numeric',
     month: 'long',
-    day: 'numeric',
-    timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone
+    day: 'numeric'
   })} at ${timeString}`;
 };
 

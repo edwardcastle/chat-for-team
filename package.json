@@ -18,9 +18,11 @@
     "@headlessui/vue": "^1.7.19",
     "@heroicons/vue": "^2.1.1",
     "@nuxtjs/supabase": "^1.1.7",
+    "@vueuse/core": "^12.8.2",
     "date-fns": "^3.3.1",
     "nuxt": "^3.13.2",
-    "unplugin-auto-import": "^19.0.0"
+    "unplugin-auto-import": "^19.0.0",
+    "vue3-virtual-scroll-list": "^0.2.1"
   },
   "devDependencies": {
     "@nuxt/eslint": "^1.0.0",
@@ -37,5 +39,6 @@
     "prettier": "^3.4.2",
     "supabase": "^2.9.6",
     "typescript": "^5.7.3"
-  }
+  },
+  "packageManager": "pnpm@9.15.4+sha512.b2dc20e2fc72b3e18848459b37359a32064663e5627a51e4c74b2c29dd8e8e0491483c3abb40789cfd578bf362fb6ba8261b05f0387d76792ed6e23ea3b1b6a0"
 }

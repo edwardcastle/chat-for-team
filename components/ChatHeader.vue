@@ -14,13 +14,16 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { computed } from 'vue';
 
 const props = defineProps({
   channel: Object,
   onlineCount: Number,
-  otherUser: Object
+  otherUser: {
+    type: Object as PropType<OnlineUser | null>,
+    default: null
+  }
 });
 
 const channelIcon = computed(() => {

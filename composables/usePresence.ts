@@ -1,19 +1,25 @@
-import type { RealtimeChannel, RealtimePostgresChangesPayload } from '@supabase/supabase-js';
+import type {
+  RealtimeChannel,
+  RealtimePostgresChangesPayload
+} from '@supabase/supabase-js';
 import { useSupabaseClient } from '#imports';
 import type { Database } from '~/types/supabase';
-
-interface OnlineUser {
-  user_id: string;
-  username?: string;
-  online: boolean;
-  last_seen?: string;
-}
+import type { OnlineUser } from '~/types/database.types';
+import { useDebounceFn } from '@vueuse/core';
 
 interface PresenceState {
   [key: string]: OnlineUser[];
 }
 
-export const usePresence = () => {
+export const usePresence = (): {
+  onlineUsers: Readonly<Ref<OnlineUser[]>>;
+  allUsers: Readonly<Ref<OnlineUser[]>>;
+  setupPresence: () => Promise<void>;
+  cleanupPresence: () => Promise<void>;
+  cleanupCache: () => Promise<void>;
+  loadAllUsers: () => Promise<void>;
+  isUserOnline: (userId: string) => boolean;
+} => {
   const supabase = useSupabaseClient<Database>();
   const { user, loadUser } = useUser();
 
@@ -23,13 +29,15 @@ export const usePresence = () => {
   let heartbeatInterval: NodeJS.Timeout | null = null;
   let _onlineUsersChannel: RealtimeChannel | null = null;
 
+  // Store active subscriptions for cleanup
+  const activeSubscriptions = new Set<RealtimeChannel>();
+
   const updatePresence = async (online: boolean): Promise<void> => {
     if (!user.value) return;
 
     try {
       await supabase.from('online_users').upsert({
-        user_id: user.value.id,
-        username: user.value.user_metadata?.username,
+        user_id: user.value.id, // Use user_id as foreign key
         online,
         last_seen: new Date().toISOString()
       });
@@ -38,6 +46,7 @@ export const usePresence = () => {
       throw new Error('Failed to update presence status');
     }
   };
+  const debouncedPresenceUpdate = useDebounceFn(updatePresence, 5000);
 
   const setupPresence = async (): Promise<void> => {
     if (import.meta.server) return;
@@ -54,41 +63,42 @@ export const usePresence = () => {
       presenceChannel
         .on('presence', { event: 'sync' }, () => {
           const state = presenceChannel?.presenceState() as PresenceState;
-          if (state) {
-            onlineUsers.value = Object.values(state)
-              .flat()
-              .filter((user) => user.online);
-            allUsers.value = allUsers.value.map(user => ({
-              ...user,
-              online: onlineUsers.value.some(u => u.user_id === user.user_id)
-            }));
-          }
+          onlineUsers.value = Object.values(state)
+            .flat()
+            .filter((user) => user.online);
+
+          // Update allUsers with latest online status
+          allUsers.value = allUsers.value.map((user) => ({
+            ...user,
+            online: onlineUsers.value.some((u) => u.user_id === user.user_id)
+          }));
         })
         .subscribe(async (status: string) => {
           if (status === 'SUBSCRIBED' && presenceChannel && user.value) {
             await presenceChannel.track({
               user_id: user.value.id,
-              username: user.value.user_metadata?.username,
               online: true
             });
             await updatePresence(true);
           }
         });
 
+      // Add to active subscriptions
+      if (presenceChannel) {
+        activeSubscriptions.add(presenceChannel);
+      }
+
       // Setup presence heartbeat
-      heartbeatInterval = setInterval(async () => {
-        try {
-          await updatePresence(true);
-        } catch (error) {
-          console.error('Presence heartbeat failed:', error);
-        }
-      }, 15000);
+      heartbeatInterval = setInterval(() => {
+        debouncedPresenceUpdate(true);
+      }, 30000);
     } catch (error) {
       console.error('Presence setup failed:', error);
       throw new Error('Failed to initialize presence tracking');
     }
 
-    _onlineUsersChannel = supabase.channel('online-users-channel')
+    _onlineUsersChannel = supabase
+      .channel('online-users-channel')
       .on(
         'postgres_changes',
         {
@@ -98,7 +108,7 @@ export const usePresence = () => {
         },
         async (payload: RealtimePostgresChangesPayload<OnlineUser>) => {
           // Update local users state
-          allUsers.value = allUsers.value.map(user => {
+          allUsers.value = allUsers.value.map((user) => {
             if (user.user_id === payload.new.user_id) {
               return {
                 ...user,
@@ -111,6 +121,11 @@ export const usePresence = () => {
         }
       )
       .subscribe();
+
+    // Add to active subscriptions
+    if (_onlineUsersChannel) {
+      activeSubscriptions.add(_onlineUsersChannel);
+    }
   };
 
   const cleanupPresence = async (): Promise<void> => {
@@ -140,7 +155,6 @@ export const usePresence = () => {
   };
 
   const loadAllUsers = async (): Promise<void> => {
-    if (import.meta.server) return;
     try {
       const { data: profiles } = await supabase
         .from('profiles')
@@ -156,14 +170,13 @@ export const usePresence = () => {
           return {
             user_id: profile.user_id,
             username: profile.username,
-            online: onlineUser?.online || false,
+            online: Boolean(onlineUser?.online),
             last_seen: onlineUser?.last_seen || null
-          };
+          } as OnlineUser;
         });
       }
     } catch (error) {
       console.error('User loading failed:', error);
-      throw new Error('Failed to load user list');
     }
   };
 
@@ -171,11 +184,26 @@ export const usePresence = () => {
     return onlineUsers.value.some((u) => u.user_id === userId && u.online);
   };
 
+  const cleanupCache = async (): Promise<void> => {
+    if (_onlineUsersChannel) {
+      await _onlineUsersChannel.unsubscribe();
+      _onlineUsersChannel = null;
+    }
+
+    if (activeSubscriptions.size > 0) {
+      for (const channel of activeSubscriptions) {
+        await channel.unsubscribe();
+      }
+      activeSubscriptions.clear();
+    }
+  };
+
   return {
-    onlineUsers: readonly(onlineUsers),
-    allUsers: readonly(allUsers),
+    onlineUsers: readonly(onlineUsers) as Readonly<Ref<OnlineUser[]>>,
+    allUsers: readonly(allUsers) as Readonly<Ref<OnlineUser[]>>,
     setupPresence,
     cleanupPresence,
+    cleanupCache,
     loadAllUsers,
     isUserOnline
   };

@@ -1,36 +1,48 @@
 <template>
-  <div class="flex mb-4" :class="{ 'justify-end': isCurrentUser }">
+  <div class="flex mb-4" :class="{ 'justify-end': source.user_id === currentUserId }">
     <div
-      class="max-w-[70%] rounded-lg p-3"
-      :class="messageClasses"
+      class="py-3 px-4"
+      :class="[
+        source.user_id === currentUserId
+          ? 'bg-chat-sent ml-auto'
+          : 'bg-white'
+      ]"
     >
-      <p>{{ message['profiles'].username }}</p>
-      <p class="text-gray-800">{{ message.content }}</p>
+      <p class="text-sm text-gray-500 mb-1">
+        {{ getUserName() }}
+      </p>
+      <p class="text-gray-800">{{ source.content }}</p>
       <div class="message-meta">
         <span class="timestamp">
-          {{ formatTime(message.created_at) }}
+          {{ formatTime(source.created_at) }}
         </span>
-        <span v-if="isCurrentUser" class="status-icons">
-          ✓✓
+        <span v-if="isCurrent" class="status-icons">
+          <template v-if="source.status === 'sending'">🕒</template>
+          <template v-else-if="source.status === 'failed'">❌</template>
+          <template v-else>✓✓</template>
         </span>
       </div>
     </div>
   </div>
 </template>
 
-<script setup>
-import { computed } from 'vue';
-import { formatTime } from '@/utils/dateUtils';
+<script setup lang="ts">
+const { currentUserId } = useUser();
 
 const props = defineProps({
-  message: Object,
-  isCurrentUser: Boolean
+  source: {
+    type: Object as PropType<MessageWithProfile>,
+    required: true
+  }
 });
 
-const messageClasses = computed(() => ({
-  'bg-chat-sent ml-auto': props.isCurrentUser,
-  'bg-white': !props.isCurrentUser
-}));
+const isCurrent = computed(
+  () => props.source.user_id === currentUserId.value
+);
+
+const getUserName = (): string => {
+  return props.source.profiles?.username || 'Unknown User';
+};
 </script>
 
 <style scoped>
@@ -44,6 +56,10 @@ const messageClasses = computed(() => ({
 
 .status-icons {
   @apply text-xs text-gray-500;
+}
+
+.bg-white {
+  @apply rounded-[13px_13px_13px_0px];
 }
 
 .bg-chat-sent {

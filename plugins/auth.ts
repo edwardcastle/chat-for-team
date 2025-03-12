@@ -41,7 +41,7 @@ export default defineNuxtPlugin(async (nuxtApp) => {
   });
 
   // Cleanup
-  nuxtApp.hook('app:afterInit', () => {
+  nuxtApp.hook('app:mounted', () => {
     subscription?.unsubscribe();
   });
 

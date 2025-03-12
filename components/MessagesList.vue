@@ -1,43 +1,63 @@
 <template>
-  <div
-    ref="messagesContainer"
-    class="flex-1 overflow-y-auto p-4 bg-chat-bg"
-  >
-    <div v-if="loading" class="text-center text-gray-500 py-4">
-      Loading messages...
-    </div>
-
-    <template v-else>
-      <MessageItem
-        v-for="message in messages"
-        :key="message.id"
-        :message="message"
-        :is-current-user="message.user_id === currentUserId"
-      />
-    </template>
-  </div>
+  <VirtualList
+    ref="virtualListRef"
+    :data-sources="enhancedMessages"
+    :data-key="'id'"
+    :data-component="MessageItem"
+    :keeps="50"
+    :start="messages.length - 1"
+    class="h-full overflow-y-auto"
+    @scroll="handleVirtualScroll"
+  />
 </template>
 
-<script setup>
-import { ref, onUpdated } from 'vue';
+<script setup lang="ts">
+import { computed } from 'vue';
+import VirtualList from 'vue3-virtual-scroll-list';
+import MessageItem from './MessageItem.vue';
 
-defineProps({
+const props = defineProps({
+  currentChannel: Object,
   messages: Array,
   currentUserId: String,
   loading: Boolean
 });
 
-const messagesContainer = ref(null);
+const virtualListRef = ref(null);
 
-// Scroll to bottom when messages update
-const scrollToBottom = () => {
-  if (messagesContainer.value) {
-    messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight;
+const enhancedMessages = computed(() => {
+  return props.messages.map((msg) => {
+    return { ...msg };
+  });
+});
+
+const handleVirtualScroll = (event) => {
+  const { scrollTop, scrollHeight, clientHeight } = event.target;
+  shouldAutoScroll.value = scrollHeight - (scrollTop + clientHeight) < 100;
+};
+
+const shouldAutoScroll = ref(true);
+
+const scrollToBottom = async (behavior = 'auto') => {
+  if (!shouldAutoScroll.value) return;
+
+  await nextTick();
+  if (virtualListRef.value) {
+    virtualListRef.value.scrollToBottom({
+      behavior
+    });
   }
 };
 
-// Automatically scroll when component updates
-onUpdated(scrollToBottom);
+watch(
+  () => props.messages,
+  (newVal, oldVal) => {
+    if (newVal.length !== oldVal.length) {
+      scrollToBottom('smooth');
+    }
+  },
+  { deep: true }
+);
 
 defineExpose({ scrollToBottom });
 </script>
