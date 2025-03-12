@@ -10,7 +10,7 @@
       </div>
 
       <ClientOnly>
-        <div v-if="isMounted">
+        <div v-show="isMounted">
           <form class="mt-8 space-y-6" @submit.prevent="handleLogin">
             <div class="rounded-md shadow-sm -space-y-px">
               <div>
@@ -59,13 +59,17 @@
             </div>
           </form>
         </div>
-        <div v-else class="loading-placeholder" />
+        <div v-show="!isMounted" class="loading-placeholder" />
       </ClientOnly>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
+definePageMeta({
+  ssr: false,
+  middleware: []
+});
 const router = useRouter();
 const { $auth } = useNuxtApp();
 const isMounted = ref(false);
