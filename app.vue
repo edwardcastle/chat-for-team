@@ -1,7 +1,8 @@
 <template>
-  <NuxtLayout>
+  <div>
+    <NuxtLoadingIndicator :height="3" color="#3b82f6" />
     <NuxtPage />
-  </NuxtLayout>
+  </div>
 </template>
 
 <script setup>
@@ -12,12 +13,14 @@ const supabase = useSupabaseClient();
 const router = useRouter();
 const { cleanupPresence } = usePresence();
 
-watchEffect(() => {
-  const route = useRoute();
-  if (!user.value && !['/login', '/register'].includes(route.path)) {
-    router.push('/login');
-  }
-});
+if (import.meta.client) {
+  watchEffect(() => {
+    const route = useRoute();
+    if (!user.value && !['/login', '/register'].includes(route.path)) {
+      router.push('/login');
+    }
+  });
+}
 
 const { data: authListener } = supabase.auth.onAuthStateChange(
   async (event) => {
